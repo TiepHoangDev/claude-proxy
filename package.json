@@ -1,0 +1,10 @@
+{
+  "name": "claude-proxy",
+  "private": true,
+  "scripts": {
+    "build": "go build -o proxy.exe ./cmd/proxy",
+    "start": "go run ./cmd/proxy",
+    "vet": "go vet ./...",
+    "clean": "rm -f proxy.exe"
+  }
+}

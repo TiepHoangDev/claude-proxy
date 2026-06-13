@@ -1,0 +1,70 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Claude Proxy Dashboard</title>
+<script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
+<style>
+body { font-family: monospace; margin: 2rem; background: #1e1e1e; color: #ddd; }
+h1 { font-size: 1.2rem; }
+table { border-collapse: collapse; width: 100%; }
+th, td { border: 1px solid #444; padding: 4px 8px; text-align: left; font-size: 0.85rem; }
+th { background: #333; }
+tr:nth-child(even) { background: #2a2a2a; }
+.status-ok { color: #6f9; }
+.status-err { color: #f66; }
+.totals { margin-bottom: 1rem; }
+a { color: #9cf; }
+</style>
+</head>
+<body x-data="dashboard()" x-init="init()">
+<h1>Claude Proxy Dashboard</h1>
+<div class="totals">
+Requests: <span x-text="totals.RequestCount"></span> |
+Input tokens: <span x-text="totals.InputTokens"></span> (+cache write <span x-text="totals.CacheCreationInputTokens"></span> +cache read <span x-text="totals.CacheReadInputTokens"></span> = <span x-text="totals.TotalInputTokens"></span> total) |
+Output tokens: <span x-text="totals.OutputTokens"></span>
+</div>
+<table>
+<tr><th>ID</th><th>Time</th><th>Method</th><th>Path</th><th>Model</th><th>Status</th><th>Input</th><th>Cache Write</th><th>Cache Read</th><th>Output</th><th>Duration (ms)</th><th>Stream</th><th>Tools</th><th>User message</th></tr>
+<template x-for="item in items" :key="item.ID">
+<tr>
+<td><a :href="'/_proxy/requests/' + item.ID" x-text="item.ID"></a></td>
+<td><a :href="'/_proxy/requests/' + item.ID" x-text="formatTime(item.Timestamp)"></a></td>
+<td x-text="item.Method"></td>
+<td x-text="item.Path"></td>
+<td x-text="item.Model"></td>
+<td :class="item.Status >= 400 ? 'status-err' : 'status-ok'" x-text="item.Status"></td>
+<td x-text="item.TotalInputTokens"></td>
+<td x-text="item.CacheCreationInputTokens"></td>
+<td x-text="item.CacheReadInputTokens"></td>
+<td x-text="item.OutputTokens"></td>
+<td x-text="item.DurationMs"></td>
+<td x-text="item.Streaming ? 'yes' : ''"></td>
+<td x-text="item.ToolNames"></td>
+<td x-text="item.UserPreview"></td>
+</tr>
+</template>
+</table>
+<script>
+function dashboard() {
+  return {
+    totals: {},
+    items: [],
+    init() {
+      this.fetchData();
+      setInterval(() => this.fetchData(), 5000);
+    },
+    async fetchData() {
+      const res = await fetch('/_proxy/api/requests');
+      const data = await res.json();
+      this.totals = data.totals;
+      this.items = data.items;
+    },
+    formatTime(ts) {
+      return new Date(ts).toLocaleTimeString('en-GB');
+    },
+  };
+}
+</script>
+</body>
+</html>

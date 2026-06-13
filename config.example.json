@@ -1,0 +1,12 @@
+{
+  "deepseek": {
+    "api_key": "sk-your-deepseek-api-key",
+    "base_url": "https://api.deepseek.com/anthropic",
+    "model": "deepseek-v4-pro",
+    "match": "haiku"
+  },
+  "system_inject": {
+    "match": "haiku",
+    "text": "If you need clarification or a decision before continuing, stop and return the question as your final result instead of guessing."
+  }
+}

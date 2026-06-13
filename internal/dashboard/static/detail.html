@@ -1,0 +1,120 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Request Detail - Claude Proxy Dashboard</title>
+<script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
+<style>
+body { font-family: monospace; margin: 2rem; background: #1e1e1e; color: #ddd; }
+h1 { font-size: 1.2rem; }
+h2 { font-size: 1rem; margin-top: 2rem; border-bottom: 1px solid #444; padding-bottom: 0.25rem; }
+pre { background: #111; padding: 0.75rem; overflow-x: auto; white-space: pre-wrap; word-break: break-all; }
+a { color: #9cf; }
+.meta { margin-bottom: 1rem; }
+.msg { margin: 0.75rem 0; padding: 0.5rem 0.75rem; border-left: 3px solid #555; background: #252525; }
+.msg-system { border-left-color: #fa6; }
+.msg-user { border-left-color: #6cf; }
+.msg-assistant { border-left-color: #6f9; }
+.msg-role { font-weight: bold; text-transform: uppercase; font-size: 0.75rem; color: #999; margin-bottom: 0.25rem; }
+.block-label { font-size: 0.75rem; color: #999; margin: 0.5rem 0 0.25rem; }
+pre.thinking { color: #999; font-style: italic; }
+details { margin-bottom: 1rem; }
+details summary { cursor: pointer; color: #9cf; margin-bottom: 0.5rem; }
+</style>
+</head>
+<body x-data="detail()" x-init="init()">
+<p><a href="/_proxy/dashboard">&larr; back to dashboard</a></p>
+<template x-if="item">
+<div>
+<h1 x-text="'Request #' + item.ID"></h1>
+<div class="meta">
+<span x-text="formatTimestamp(item.Timestamp)"></span> | <span x-text="item.Method"></span> <span x-text="item.Path"></span> | model: <span x-text="item.Model"></span> | status: <span x-text="item.Status"></span> | duration: <span x-text="item.DurationMs"></span>ms | streaming: <span x-text="item.Streaming"></span>
+<br>
+input tokens: <span x-text="item.InputTokens"></span> (+cache write <span x-text="item.CacheCreationInputTokens"></span> +cache read <span x-text="item.CacheReadInputTokens"></span> = <span x-text="item.TotalInputTokens"></span> total) | output tokens: <span x-text="item.OutputTokens"></span>
+</div>
+
+<h2>Conversation timeline</h2>
+<template x-if="Timeline.length">
+<div>
+<template x-for="(entry, ei) in Timeline" :key="ei">
+<div class="msg" :class="'msg-' + entry.Role">
+<div class="msg-role" x-text="entry.Role"></div>
+<template x-for="(block, bi) in entry.Blocks" :key="bi">
+<div>
+<template x-if="block.Type === 'text'">
+<pre x-text="block.Text"></pre>
+</template>
+<template x-if="block.Type === 'thinking'">
+<div>
+<div class="block-label">thinking</div>
+<pre class="thinking" x-text="block.Text"></pre>
+</div>
+</template>
+<template x-if="block.Type === 'tool_use'">
+<div>
+<div class="block-label" x-text="'tool_use: ' + block.Name + ' (' + block.ToolUseID + ')'"></div>
+<pre x-text="formatInput(block.Input)"></pre>
+</div>
+</template>
+<template x-if="block.Type === 'tool_result'">
+<div>
+<div class="block-label" x-text="'tool_result for ' + block.ToolUseID + (block.IsError ? ' (error)' : '')"></div>
+<pre x-text="block.ResultText"></pre>
+</div>
+</template>
+<template x-if="block.Type === 'image'">
+<div class="block-label">[image]</div>
+</template>
+<template x-if="!['text','thinking','tool_use','tool_result','image'].includes(block.Type)">
+<pre x-text="block.Raw"></pre>
+</template>
+</div>
+</template>
+</div>
+</template>
+</div>
+</template>
+<template x-if="!Timeline.length">
+<p>could not parse request body as a Messages API request — see raw bodies below</p>
+</template>
+
+<details>
+<summary>Raw request body</summary>
+<pre x-text="item.RequestBody"></pre>
+</details>
+
+<details>
+<summary>Raw response body</summary>
+<pre x-text="item.ResponseBody"></pre>
+</details>
+</div>
+</template>
+<script>
+function detail() {
+  return {
+    item: null,
+    Timeline: [],
+    init() {
+      const parts = window.location.pathname.split('/');
+      const id = parts[parts.length - 1];
+      fetch('/_proxy/api/requests/' + id)
+        .then(res => res.json())
+        .then(data => {
+          this.item = data;
+          this.Timeline = data.Timeline || [];
+          document.title = 'Request #' + data.ID + ' - Claude Proxy Dashboard';
+        });
+    },
+    formatTimestamp(ts) {
+      const d = new Date(ts);
+      return d.toLocaleDateString('en-CA') + ' ' + d.toLocaleTimeString('en-GB');
+    },
+    formatInput(input) {
+      if (input === null || input === undefined) return '';
+      return JSON.stringify(input, null, 2);
+    },
+  };
+}
+</script>
+</body>
+</html>
