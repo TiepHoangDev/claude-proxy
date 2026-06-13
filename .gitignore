@@ -1,6 +1,2 @@
-/proxy.exe
-/error.log
-/request.log
-/tools.log
+/build/
 /config.json
-/proxy_run.log

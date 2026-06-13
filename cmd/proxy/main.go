@@ -19,6 +19,7 @@ import (
 
 	"claude-proxy/internal/dashboard"
 	"claude-proxy/internal/router"
+	"claude-proxy/internal/setup"
 	"claude-proxy/internal/stats"
 )
 
@@ -26,10 +27,16 @@ import (
 // from statsMiddleware to the proxy's Director.
 type routeCtxKey struct{}
 
+const configPath = "config.json"
+
 func main() {
-	errFile, err := os.OpenFile("error.log", os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o644)
+	if err := os.MkdirAll("build", 0o755); err != nil {
+		log.Fatalf("failed to create build directory: %v", err)
+	}
+
+	errFile, err := os.OpenFile("build/error.log", os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o644)
 	if err != nil {
-		log.Fatalf("failed to open error.log: %v", err)
+		log.Fatalf("failed to open build/error.log: %v", err)
 	}
 	defer errFile.Close()
 	log.SetOutput(io.MultiWriter(os.Stdout, errFile))
@@ -39,10 +46,10 @@ func main() {
 		log.Fatalf("invalid target URL: %v", err)
 	}
 
-	routerCfg, err := router.Load("config.json")
+	routerHolder, err := router.NewHolder(configPath)
 	if err != nil {
-		log.Printf("failed to load config.json, alternate routing disabled: %v", err)
-		routerCfg = &router.Config{}
+		log.Printf("failed to load %s, alternate routing disabled: %v", configPath, err)
+		routerHolder = &router.Holder{}
 	}
 
 	proxy := &httputil.ReverseProxy{
@@ -73,20 +80,24 @@ func main() {
 	}
 
 	store := stats.NewStore(200)
-	reqLogger := stats.NewFileLogger("request.log", 100)
-	toolLogger := stats.NewFileLogger("tools.log", 500)
+	reqLogger := stats.NewFileLogger("build/request.log", 100)
+	toolLogger := stats.NewFileLogger("build/tools.log", 500)
+
+	port := os.Getenv("PORT")
+	if port == "" {
+		port = "8080"
+	}
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("/_proxy/dashboard", dashboard.Handler())
 	mux.HandleFunc("/_proxy/api/requests", dashboard.APIHandler(store))
 	mux.HandleFunc("/_proxy/api/requests/{id}", dashboard.DetailAPIHandler(store))
 	mux.HandleFunc("/_proxy/requests/{id}", dashboard.DetailHandler())
-	mux.HandleFunc("/", statsMiddleware(store, reqLogger, toolLogger, routerCfg, proxy))
-
-	port := os.Getenv("PORT")
-	if port == "" {
-		port = "8080"
-	}
+	mux.HandleFunc("/_proxy/setup", setup.Handler())
+	mux.HandleFunc("/_proxy/api/setup/status", setup.StatusAPIHandler(routerHolder, port))
+	mux.HandleFunc("/_proxy/api/setup/save", setup.SaveAPIHandler(routerHolder))
+	mux.HandleFunc("/_proxy/api/setup/test-deepseek", setup.TestDeepSeekAPIHandler())
+	mux.HandleFunc("/", statsMiddleware(store, reqLogger, toolLogger, routerHolder, proxy))
 
 	server := &http.Server{
 		Addr:              ":" + port,
@@ -98,9 +109,13 @@ func main() {
 	log.Printf("proxying to %s on :%s, dashboard at %s", target, port, dashboardURL)
 
 	if os.Getenv("NO_BROWSER") == "" {
+		startURL := dashboardURL
+		if _, err := os.Stat(configPath); os.IsNotExist(err) {
+			startURL = fmt.Sprintf("http://localhost:%s/_proxy/setup", port)
+		}
 		go func() {
 			time.Sleep(300 * time.Millisecond)
-			openBrowser(dashboardURL)
+			openBrowser(startURL)
 		}()
 	}
 
@@ -118,9 +133,10 @@ const (
 	maxStoredBody = 32 * 1024
 )
 
-func statsMiddleware(store *stats.Store, reqLogger, toolLogger *stats.FileLogger, routerCfg *router.Config, proxy *httputil.ReverseProxy) http.HandlerFunc {
+func statsMiddleware(store *stats.Store, reqLogger, toolLogger *stats.FileLogger, routerHolder *router.Holder, proxy *httputil.ReverseProxy) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		start := time.Now()
+		routerCfg := routerHolder.Get()
 
 		var bodyBytes []byte
 		var reqModel string
@@ -188,7 +204,7 @@ func statsMiddleware(store *stats.Store, reqLogger, toolLogger *stats.FileLogger
 		}
 		store.Add(entry)
 		if err := reqLogger.Append(entry); err != nil {
-			log.Printf("failed to write request.log: %v", err)
+			log.Printf("failed to write build/request.log: %v", err)
 		}
 
 		for _, tu := range result.ToolUses {
@@ -198,7 +214,7 @@ func statsMiddleware(store *stats.Store, reqLogger, toolLogger *stats.FileLogger
 				Name:      tu.Name,
 				Input:     tu.Input,
 			}); err != nil {
-				log.Printf("failed to write tools.log: %v", err)
+				log.Printf("failed to write build/tools.log: %v", err)
 			}
 		}
 		for _, tr := range toolResults {
@@ -208,7 +224,7 @@ func statsMiddleware(store *stats.Store, reqLogger, toolLogger *stats.FileLogger
 				ToolUseID: tr.ToolUseID,
 				Size:      tr.Size,
 			}); err != nil {
-				log.Printf("failed to write tools.log: %v", err)
+				log.Printf("failed to write build/tools.log: %v", err)
 			}
 		}
 	}

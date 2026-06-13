@@ -13,10 +13,10 @@ A Go reverse proxy that forwards all requests to `https://api.anthropic.com`, tr
 ## Commands
 
 ```bash
-go build -o proxy.exe ./cmd/proxy   # build
-go vet ./...                         # static checks
-go test ./...                        # run tests
-go run ./cmd/proxy                   # run (default port 8080)
+go build -o build/proxy.exe ./cmd/proxy   # build
+go vet ./...                               # static checks
+go test ./...                              # run tests
+go run ./cmd/proxy                         # run (default port 8080)
 ```
 
 Run a single test: `go test ./internal/stats/ -run TestBlocksFromContent`
@@ -24,18 +24,22 @@ Run a single test: `go test ./internal/stats/ -run TestBlocksFromContent`
 Or via npm scripts (package.json wraps the same commands): `npm run build`, `npm start`, `npm run vet`, `npm run clean`.
 
 - `PORT` env var overrides the listen port (default `8080`).
-- `NO_BROWSER=1` disables auto-opening the dashboard in the browser on startup.
+- `NO_BROWSER=1` disables auto-opening the dashboard/setup page in the browser on startup.
+- The binary and runtime logs (`error.log`, `request.log`, `tools.log`) live under `build/`; `config.json` stays in the project root.
 
 ## Architecture
 
 - **cmd/proxy/main.go** — sets up `httputil.ReverseProxy` targeting `api.anthropic.com` (`FlushInterval = -1` for SSE streaming). Routes via `http.ServeMux`:
   - `/_proxy/dashboard`, `/_proxy/api/requests` — request list page and JSON (`dashboard.Handler`, `dashboard.APIHandler`)
   - `/_proxy/requests/{id}`, `/_proxy/api/requests/{id}` — per-request detail page and JSON (`dashboard.DetailHandler`, `dashboard.DetailAPIHandler`)
+  - `/_proxy/setup`, `/_proxy/api/setup/status`, `/_proxy/api/setup/save`, `/_proxy/api/setup/test-deepseek` — setup/config page and its JSON APIs (`setup.Handler`, `setup.StatusAPIHandler`, `setup.SaveAPIHandler`, `setup.TestDeepSeekAPIHandler`)
   - `/` — everything else goes through `statsMiddleware` → proxy
 
-  `statsMiddleware` reads and re-sets the request body (`io.NopCloser`) to extract the request model and any `tool_result` blocks before forwarding, wraps the response in a `CaptureWriter`, and on completion builds a `stats.RequestLog` that is stored in the in-memory `Store` and appended to `request.log` via a `FileLogger`. Tool uses/results are also appended to `tools.log`. Stored request/response bodies are pretty-printed and capped (`capBody`/`maxStoredBody`); `CaptureWriter` itself buffers up to `captureBodyCap` (128KB) of the response for parsing/display.
+  `statsMiddleware` reads and re-sets the request body (`io.NopCloser`) to extract the request model and any `tool_result` blocks before forwarding, wraps the response in a `CaptureWriter`, and on completion builds a `stats.RequestLog` that is stored in the in-memory `Store` and appended to `build/request.log` via a `FileLogger`. Tool uses/results are also appended to `build/tools.log`. Stored request/response bodies are pretty-printed and capped (`capBody`/`maxStoredBody`); `CaptureWriter` itself buffers up to `captureBodyCap` (128KB) of the response for parsing/display.
 
-  On startup, opens the dashboard URL in the default browser after a short delay (unless `NO_BROWSER` is set).
+  The routing config (`config.json`) is held in a `*router.Holder`, read fresh each request via `Get()` so changes saved from the setup page apply without a restart.
+
+  On startup, opens the setup page (if `config.json` doesn't exist yet) or the dashboard URL in the default browser after a short delay (unless `NO_BROWSER` is set).
 
 - **internal/stats/capture.go** — `CaptureWriter` wraps the `http.ResponseWriter` to extract token usage, tool calls, and content blocks without breaking streaming:
   - For `text/event-stream` (streaming) responses, parses SSE `data:` lines incrementally line-by-line as bytes are written: `message_start` (input/cache tokens + model), `message_delta` (output/cache tokens), and `content_block_start`/`content_block_delta`/`content_block_stop` (accumulates `tool_use`, `text`, and `thinking` blocks into `pendingBlock`s, emitted as `ToolUse`s and `TimelineBlock`s).

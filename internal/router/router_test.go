@@ -2,6 +2,9 @@ package router
 
 import (
 	"encoding/json"
+	"net/http"
+	"net/http/httptest"
+	"path/filepath"
 	"testing"
 )
 
@@ -201,5 +204,109 @@ func TestInjectSystemPromptArrayExisting(t *testing.T) {
 func TestInjectSystemPromptInvalidJSON(t *testing.T) {
 	if _, err := InjectSystemPrompt([]byte("not json"), "extra"); err == nil {
 		t.Error("expected error for invalid JSON input")
+	}
+}
+
+func TestSaveLoadRoundTrip(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.json")
+	want := testConfig()
+	want.SystemInject = &SystemInjectConfig{Match: "haiku", Text: "ask if unsure"}
+
+	if err := Save(path, want); err != nil {
+		t.Fatalf("Save error: %v", err)
+	}
+
+	got, err := Load(path)
+	if err != nil {
+		t.Fatalf("Load error: %v", err)
+	}
+	if got.DeepSeek == nil || *got.DeepSeek != *want.DeepSeek {
+		t.Errorf("DeepSeek = %+v, want %+v", got.DeepSeek, want.DeepSeek)
+	}
+	if got.SystemInject == nil || *got.SystemInject != *want.SystemInject {
+		t.Errorf("SystemInject = %+v, want %+v", got.SystemInject, want.SystemInject)
+	}
+}
+
+func TestSaveClearsEmptySections(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.json")
+	cfg := &Config{DeepSeek: &DeepSeekConfig{}, SystemInject: &SystemInjectConfig{}}
+
+	if err := Save(path, cfg); err != nil {
+		t.Fatalf("Save error: %v", err)
+	}
+
+	got, err := Load(path)
+	if err != nil {
+		t.Fatalf("Load error: %v", err)
+	}
+	if got.DeepSeek != nil {
+		t.Errorf("DeepSeek = %+v, want nil", got.DeepSeek)
+	}
+	if got.SystemInject != nil {
+		t.Errorf("SystemInject = %+v, want nil", got.SystemInject)
+	}
+}
+
+func TestHolderGetSetAndSave(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.json")
+	h, err := NewHolder(path)
+	if err != nil {
+		t.Fatalf("NewHolder error: %v", err)
+	}
+	if h.Get().DeepSeek != nil {
+		t.Errorf("expected empty initial config, got %+v", h.Get())
+	}
+
+	cfg := testConfig()
+	if err := h.SetAndSave(path, cfg); err != nil {
+		t.Fatalf("SetAndSave error: %v", err)
+	}
+	if h.Get().DeepSeek == nil || *h.Get().DeepSeek != *cfg.DeepSeek {
+		t.Errorf("Get() after SetAndSave = %+v, want %+v", h.Get().DeepSeek, cfg.DeepSeek)
+	}
+
+	reloaded, err := Load(path)
+	if err != nil {
+		t.Fatalf("Load error: %v", err)
+	}
+	if reloaded.DeepSeek == nil || *reloaded.DeepSeek != *cfg.DeepSeek {
+		t.Errorf("reloaded config = %+v, want %+v", reloaded.DeepSeek, cfg.DeepSeek)
+	}
+}
+
+func TestTestDeepSeekSuccess(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("x-api-key") != "sk-test" {
+			t.Errorf("missing or wrong x-api-key header: %q", r.Header.Get("x-api-key"))
+		}
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte(`{"id":"msg_1"}`))
+	}))
+	defer srv.Close()
+
+	ok, msg := TestDeepSeek(&DeepSeekConfig{APIKey: "sk-test", BaseURL: srv.URL, Model: "deepseek-v4-pro"})
+	if !ok {
+		t.Errorf("expected ok=true, got message %q", msg)
+	}
+}
+
+func TestTestDeepSeekInvalidKey(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusUnauthorized)
+		w.Write([]byte(`{"error":"invalid api key"}`))
+	}))
+	defer srv.Close()
+
+	ok, msg := TestDeepSeek(&DeepSeekConfig{APIKey: "sk-bad", BaseURL: srv.URL})
+	if ok {
+		t.Errorf("expected ok=false, got ok=true with message %q", msg)
+	}
+}
+
+func TestTestDeepSeekMissingFields(t *testing.T) {
+	ok, _ := TestDeepSeek(&DeepSeekConfig{})
+	if ok {
+		t.Error("expected ok=false for empty config")
 	}
 }

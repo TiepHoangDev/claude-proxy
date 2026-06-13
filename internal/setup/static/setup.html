@@ -1,0 +1,163 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Setup - Claude Proxy</title>
+<script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
+<style>
+body { font-family: monospace; margin: 2rem; background: #1e1e1e; color: #ddd; max-width: 50rem; }
+h1 { font-size: 1.2rem; }
+h2 { font-size: 1rem; margin-top: 2rem; border-bottom: 1px solid #444; padding-bottom: 0.25rem; }
+a { color: #9cf; }
+pre { background: #111; padding: 0.75rem; overflow-x: auto; white-space: pre-wrap; word-break: break-all; }
+.shell { margin: 0.75rem 0; }
+.shell-label { font-size: 0.75rem; color: #999; text-transform: uppercase; margin-bottom: 0.25rem; }
+.cmd-row { display: flex; align-items: stretch; gap: 0.5rem; }
+.cmd-row pre { flex: 1; margin: 0; }
+button { background: #333; color: #ddd; border: 1px solid #555; padding: 0.4rem 0.8rem; font-family: monospace; cursor: pointer; }
+button:hover { background: #444; }
+button:disabled { opacity: 0.5; cursor: default; }
+label { display: block; margin-top: 0.5rem; font-size: 0.85rem; color: #ccc; }
+input[type=text], input[type=password], textarea {
+  width: 100%; box-sizing: border-box; background: #111; color: #ddd; border: 1px solid #444;
+  padding: 0.4rem; font-family: monospace; margin-top: 0.15rem;
+}
+textarea { min-height: 4rem; resize: vertical; }
+.row { margin-bottom: 0.75rem; }
+.actions { margin-top: 0.75rem; display: flex; gap: 0.5rem; align-items: center; }
+.result-ok { color: #6f9; }
+.result-err { color: #f66; }
+.hint { color: #999; font-size: 0.85rem; }
+</style>
+</head>
+<body x-data="setupPage()" x-init="init()">
+<p><a href="/_proxy/dashboard">&larr; back to dashboard</a></p>
+<h1>Claude Proxy Setup</h1>
+
+<h2>1. Connect Claude Code to this proxy</h2>
+<p class="hint">Run one of these in the shell where you use Claude Code, then start (or restart) it.</p>
+<template x-for="sh in shells" :key="sh.label">
+<div class="shell">
+  <div class="shell-label" x-text="sh.label"></div>
+  <div class="cmd-row">
+    <pre x-text="sh.connect"></pre>
+    <button @click="copy(sh.connect)">Copy</button>
+  </div>
+</div>
+</template>
+
+<h2>2. DeepSeek routing (optional)</h2>
+<p class="hint">Redirect requests for models matching a substring to DeepSeek's Anthropic-compatible API.</p>
+<div class="row">
+  <label>API key
+    <input type="password" x-model="deepseek.api_key" placeholder="sk-...">
+  </label>
+  <label>Base URL
+    <input type="text" x-model="deepseek.base_url" placeholder="https://api.deepseek.com/anthropic">
+  </label>
+  <label>Model
+    <input type="text" x-model="deepseek.model" placeholder="deepseek-v4-pro">
+  </label>
+  <label>Match (substring of requested model, case-insensitive)
+    <input type="text" x-model="deepseek.match" placeholder="haiku">
+  </label>
+  <div class="actions">
+    <button @click="testDeepSeek()" :disabled="testing">Test</button>
+    <button @click="save()" :disabled="saving">Save</button>
+    <span x-show="testResult" :class="testResult && testResult.ok ? 'result-ok' : 'result-err'" x-text="testResult && testResult.message"></span>
+  </div>
+</div>
+
+<h2>3. System prompt injection (optional)</h2>
+<p class="hint">Append extra text to the system prompt for requests whose model matches.</p>
+<div class="row">
+  <label>Match (substring of requested model, case-insensitive)
+    <input type="text" x-model="systemInject.match" placeholder="haiku">
+  </label>
+  <label>Text to append
+    <textarea x-model="systemInject.text" placeholder="If you need clarification..."></textarea>
+  </label>
+  <div class="actions">
+    <button @click="save()" :disabled="saving">Save</button>
+    <span x-show="saveResult" :class="saveResult && saveResult.ok ? 'result-ok' : 'result-err'" x-text="saveResult && (saveResult.ok ? 'Saved.' : saveResult.message)"></span>
+  </div>
+</div>
+
+<h2>4. Revert to normal</h2>
+<p class="hint">Point Claude Code back at the real Anthropic API.</p>
+<template x-for="sh in shells" :key="sh.label + '-revert'">
+<div class="shell">
+  <div class="shell-label" x-text="sh.label"></div>
+  <div class="cmd-row">
+    <pre x-text="sh.revert"></pre>
+    <button @click="copy(sh.revert)">Copy</button>
+  </div>
+</div>
+</template>
+
+<p><a href="/_proxy/dashboard">Go to dashboard &rarr;</a></p>
+
+<script>
+function setupPage() {
+  return {
+    status: { os: '', port: '', proxyUrl: '', configured: false, config: {} },
+    deepseek: { api_key: '', base_url: 'https://api.deepseek.com/anthropic', model: 'deepseek-v4-pro', match: 'haiku' },
+    systemInject: { match: 'haiku', text: 'If you need clarification or a decision before continuing, stop and return the question as your final result instead of guessing.' },
+    testResult: null,
+    saveResult: null,
+    testing: false,
+    saving: false,
+    async init() {
+      const res = await fetch('/_proxy/api/setup/status');
+      this.status = await res.json();
+      const cfg = this.status.config || {};
+      if (cfg.deepseek) this.deepseek = { ...this.deepseek, ...cfg.deepseek };
+      if (cfg.system_inject) this.systemInject = { ...this.systemInject, ...cfg.system_inject };
+    },
+    get shells() {
+      const url = this.status.proxyUrl || 'http://localhost:8080';
+      return [
+        { label: 'bash / zsh', connect: `export ANTHROPIC_BASE_URL=${url}`, revert: 'unset ANTHROPIC_BASE_URL' },
+        { label: 'fish', connect: `set -x ANTHROPIC_BASE_URL ${url}`, revert: 'set -e ANTHROPIC_BASE_URL' },
+        { label: 'PowerShell', connect: `$env:ANTHROPIC_BASE_URL = "${url}"`, revert: 'Remove-Item Env:ANTHROPIC_BASE_URL' },
+        { label: 'cmd', connect: `set ANTHROPIC_BASE_URL=${url}`, revert: 'set ANTHROPIC_BASE_URL=' },
+      ];
+    },
+    copy(text) {
+      navigator.clipboard.writeText(text);
+    },
+    async testDeepSeek() {
+      this.testing = true;
+      this.testResult = null;
+      try {
+        const res = await fetch('/_proxy/api/setup/test-deepseek', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(this.deepseek),
+        });
+        this.testResult = await res.json();
+      } finally {
+        this.testing = false;
+      }
+    },
+    async save() {
+      this.saving = true;
+      this.saveResult = null;
+      try {
+        const cfg = { deepseek: this.deepseek, system_inject: this.systemInject };
+        const res = await fetch('/_proxy/api/setup/save', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(cfg),
+        });
+        this.saveResult = await res.json();
+        if (this.saveResult.ok) this.status.configured = true;
+      } finally {
+        this.saving = false;
+      }
+    },
+  };
+}
+</script>
+</body>
+</html>

@@ -18,7 +18,7 @@ a { color: #9cf; }
 </style>
 </head>
 <body x-data="dashboard()" x-init="init()">
-<h1>Claude Proxy Dashboard</h1>
+<h1>Claude Proxy Dashboard <a href="/_proxy/setup" style="font-size: 0.7rem;">&#9881; Config</a></h1>
 <div class="totals">
 Requests: <span x-text="totals.RequestCount"></span> |
 Input tokens: <span x-text="totals.InputTokens"></span> (+cache write <span x-text="totals.CacheCreationInputTokens"></span> +cache read <span x-text="totals.CacheReadInputTokens"></span> = <span x-text="totals.TotalInputTokens"></span> total) |
