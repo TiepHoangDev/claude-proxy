@@ -32,8 +32,8 @@ release binary and provides status bar controls.
 
 **Option A: VSIX file (recommended for sharing)**
 
-Download the `.vsix` file from the latest
-[GitHub Release](https://github.com/TiepHoangDev/claude-proxy/releases), then
+Download the `.vsix` file from the
+[latest GitHub Release](https://github.com/TiepHoangDev/claude-proxy/releases/latest), then
 install via command line:
 
 ```bash

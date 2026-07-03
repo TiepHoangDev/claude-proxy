@@ -2,8 +2,13 @@ name: Release
 
 on:
   push:
-    tags: ["v*.*.*"]
-  workflow_dispatch: {}
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version (e.g., v0.2.0). Leave empty to auto-bump patch.'
+        required: false
+        default: ''
 
 permissions:
   contents: write
@@ -18,8 +23,39 @@ jobs:
       - run: go vet ./...
       - run: go test ./...
 
-  build:
+  tag:
     needs: test
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.compute.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Compute version
+        id: compute
+        run: |
+          INPUT="${{ github.event.inputs.version }}"
+          if [ -n "$INPUT" ]; then
+            NEW="$INPUT"
+          else
+            LATEST=$(git tag -l 'v[0-9]*.[0-9]*.[0-9]*' --sort=-v:refname | head -1)
+            if [ -z "$LATEST" ]; then
+              NEW="v0.1.0"
+            else
+              MAJOR=$(echo "$LATEST" | cut -d. -f1 | sed 's/v//')
+              MINOR=$(echo "$LATEST" | cut -d. -f2)
+              PATCH=$(echo "$LATEST" | cut -d. -f3)
+              NEW="v$MAJOR.$MINOR.$((PATCH + 1))"
+            fi
+          fi
+          echo "version=$NEW" >> "$GITHUB_OUTPUT"
+          echo "version=$NEW"
+
+  build:
+    needs: tag
     runs-on: ubuntu-latest
     strategy:
       matrix:
@@ -42,12 +78,12 @@ jobs:
             ./cmd/proxy
       - uses: actions/upload-artifact@v4
         with:
-          name: claude-proxy-${{ matrix.goos }}-${{ matrix.goarch }}
+          name: bin-${{ matrix.goos }}-${{ matrix.goarch }}
           path: dist/*
           retention-days: 1
 
   vsix:
-    needs: test
+    needs: tag
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -59,22 +95,44 @@ jobs:
           cd vscode-extension
           npm ci
           npx vsce package
+          mkdir -p ../dist
+          mv *.vsix ../dist/
       - uses: actions/upload-artifact@v4
         with:
-          name: vscode-extension
-          path: vscode-extension/*.vsix
+          name: vsix
+          path: dist/*
           retention-days: 1
 
   release:
-    needs: [build, vsix]
+    needs: [build, vsix, tag]
     runs-on: ubuntu-latest
     steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
       - uses: actions/download-artifact@v4
         with:
           path: dist
           merge-multiple: true
-      - name: Publish release
-        uses: softprops/action-gh-release@v2
-        with:
-          files: dist/*
-          generate_release_notes: true
+
+      - name: Create tag and release
+        env:
+          VERSION: ${{ needs.tag.outputs.version }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          ls -la dist/
+
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+          if ! git rev-parse "$VERSION" >/dev/null 2>&1; then
+            git tag -a "$VERSION" -m "$VERSION"
+            git push origin "$VERSION"
+          fi
+
+          gh release create "$VERSION" dist/* \
+            --title "$VERSION" \
+            --generate-notes
