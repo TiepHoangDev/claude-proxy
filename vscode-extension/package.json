@@ -1,0 +1,56 @@
+{
+  "name": "claude-proxy-vscode",
+  "displayName": "Claude Proxy",
+  "description": "Start, stop, and configure the claude-proxy reverse proxy without leaving VSCode.",
+  "version": "0.1.0",
+  "publisher": "TiepHoangDev",
+  "private": true,
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/TiepHoangDev/claude-proxy"
+  },
+  "engines": {
+    "vscode": "^1.90.0"
+  },
+  "categories": ["Other"],
+  "activationEvents": ["onStartupFinished"],
+  "main": "./out/extension.js",
+  "contributes": {
+    "commands": [
+      { "command": "claudeProxy.start", "title": "Claude Proxy: Start" },
+      { "command": "claudeProxy.stop", "title": "Claude Proxy: Stop" },
+      { "command": "claudeProxy.restart", "title": "Claude Proxy: Restart" },
+      { "command": "claudeProxy.openDashboard", "title": "Claude Proxy: Open Dashboard" },
+      { "command": "claudeProxy.openSetup", "title": "Claude Proxy: Open Setup / Config" },
+      { "command": "claudeProxy.showLogs", "title": "Claude Proxy: Show Logs" },
+      { "command": "claudeProxy.checkForUpdate", "title": "Claude Proxy: Check for Binary Update" }
+    ],
+    "configuration": {
+      "title": "Claude Proxy",
+      "properties": {
+        "claudeProxy.port": {
+          "type": "number",
+          "default": 8080,
+          "description": "Port the local claude-proxy server listens on."
+        },
+        "claudeProxy.autoStart": {
+          "type": "boolean",
+          "default": false,
+          "description": "Start claude-proxy automatically when VSCode starts."
+        }
+      }
+    }
+  },
+  "scripts": {
+    "vscode:prepublish": "npm run compile",
+    "compile": "tsc -p ./",
+    "watch": "tsc -watch -p ./",
+    "package": "vsce package"
+  },
+  "devDependencies": {
+    "@types/vscode": "^1.90.0",
+    "@types/node": "^20.0.0",
+    "typescript": "^5.5.0",
+    "@vscode/vsce": "^3.0.0"
+  }
+}
