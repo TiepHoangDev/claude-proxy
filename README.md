@@ -22,6 +22,54 @@ dashboard for inspection.
 
 ![Request detail](docs/detail.png)
 
+## VS Code Extension
+
+A companion VS Code extension is available for one-click install, start/stop,
+and configuration of claude-proxy. The extension auto-downloads the latest
+release binary and provides status bar controls.
+
+### Installation
+
+**Option A: VSIX file (recommended for sharing)**
+
+Download the `.vsix` file from the latest
+[GitHub Release](https://github.com/TiepHoangDev/claude-proxy/releases), then
+install via command line:
+
+```bash
+code --install-extension claude-proxy-vscode-*.vsix
+```
+
+Or from within VS Code: **Extensions (Ctrl+Shift+X) → "..." → Install from VSIX...** → select the file.
+
+**Option B: Build from source**
+
+```bash
+cd vscode-extension
+npm ci
+npx vsce package
+code --install-extension claude-proxy-vscode-*.vsix
+```
+
+### Commands
+
+Open the Command Palette (Ctrl+Shift+P) and type "Claude Proxy":
+
+| Command | Description |
+|---|---|
+| **Start** | Auto-download the latest binary and start the proxy |
+| **Stop** | Stop the running proxy |
+| **Restart** | Stop then start again |
+| **Open Dashboard** | Open `/_proxy/dashboard` in the browser |
+| **Open Setup / Config** | Open `/_proxy/setup` in the browser |
+| **Show Logs** | View proxy output in the VS Code Output panel |
+| **Check for Binary Update** | Check GitHub for a newer binary release |
+
+### Settings
+
+- `claudeProxy.port` — port the proxy listens on (default `8080`)
+- `claudeProxy.autoStart` — start the proxy automatically when VS Code opens (default `false`)
+
 ## Usage
 
 ```bash
