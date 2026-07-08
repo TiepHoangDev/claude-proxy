@@ -1,6 +1,6 @@
 {
   "name": "claude-proxy-vscode",
-  "displayName": "Claude Proxy",
+  "displayName": "Claude Proxy Monitor",
   "description": "Start, stop, and configure the claude-proxy reverse proxy without leaving VSCode.",
   "version": "0.1.0",
   "publisher": "TiepHoangDev",
