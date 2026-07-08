@@ -37,6 +37,11 @@
           "type": "boolean",
           "default": false,
           "description": "Start claude-proxy automatically when VSCode starts."
+        },
+        "claudeProxy.devBinary": {
+          "type": "string",
+          "default": "",
+          "description": "Local path to a dev claude-proxy binary. When set and the file exists, skips GitHub download and uses this binary directly."
         }
       }
     }

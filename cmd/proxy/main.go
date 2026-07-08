@@ -88,6 +88,27 @@ func main() {
 		port = "8080"
 	}
 
+	go func() {
+		for {
+			cfg := routerHolder.Get()
+			if cfg != nil && cfg.DeepSeek != nil {
+				bal := router.FetchDeepSeekBalance(cfg.DeepSeek)
+				if bal != nil {
+					store.UpdateDeepSeekBalance(&stats.DeepSeekBalance{
+						IsAvailable: bal.IsAvailable,
+						Currency:    bal.Currency,
+						Total:       bal.Total,
+						Display:     bal.Display(),
+					})
+				}
+			}
+			if usage := fetchClaudeUsage(); usage != nil {
+				store.UpdateClaudeUsage(usage)
+			}
+			time.Sleep(60 * time.Second)
+		}
+	}()
+
 	mux := http.NewServeMux()
 	mux.HandleFunc("/_proxy/dashboard", dashboard.Handler())
 	mux.HandleFunc("/_proxy/api/requests", dashboard.APIHandler(store))
@@ -97,6 +118,7 @@ func main() {
 	mux.HandleFunc("/_proxy/api/setup/status", setup.StatusAPIHandler(routerHolder, port))
 	mux.HandleFunc("/_proxy/api/setup/save", setup.SaveAPIHandler(routerHolder))
 	mux.HandleFunc("/_proxy/api/setup/test-deepseek", setup.TestDeepSeekAPIHandler())
+	mux.HandleFunc("/_proxy/api/health", healthAPIHandler(store))
 	mux.HandleFunc("/", statsMiddleware(store, reqLogger, toolLogger, routerHolder, proxy))
 
 	server := &http.Server{
@@ -151,6 +173,12 @@ func statsMiddleware(store *stats.Store, reqLogger, toolLogger *stats.FileLogger
 			}
 		}
 
+		if auth := r.Header.Get("Authorization"); auth != "" {
+			store.SetAuth(auth)
+		} else if key := r.Header.Get("x-api-key"); key != "" {
+			store.SetAuth(key)
+		}
+
 		if text, ok := routerCfg.InjectSystem(reqModel); ok {
 			if newBody, err := router.InjectSystemPrompt(bodyBytes, text); err == nil {
 				bodyBytes = newBody
@@ -182,6 +210,13 @@ func statsMiddleware(store *stats.Store, reqLogger, toolLogger *stats.FileLogger
 		if model == "" {
 			model = reqModel
 		}
+
+		// Update rate limit and API key health state from the response.
+		apiKeyErr := result.APIKeyError
+		if apiKeyErr == "" && cw.Status() == 403 {
+			apiKeyErr = "Forbidden: check if your API key has funds or access"
+		}
+		store.UpdateHealth(result.RateLimit, apiKeyErr)
 
 		entry := stats.RequestLog{
 			Timestamp:                start,
@@ -242,6 +277,69 @@ func capBody(b []byte) string {
 		return string(b)
 	}
 	return string(b[:maxStoredBody]) + "\n...(truncated)"
+}
+
+func fetchClaudeUsage() *stats.ClaudeUsage {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return nil
+	}
+	credsPath := home + "/.claude/.credentials.json"
+	data, err := os.ReadFile(credsPath)
+	if err != nil {
+		return nil
+	}
+	var creds struct {
+		ClaudeAiOauth struct {
+			AccessToken string `json:"accessToken"`
+		} `json:"claudeAiOauth"`
+	}
+	if err := json.Unmarshal(data, &creds); err != nil || creds.ClaudeAiOauth.AccessToken == "" {
+		return nil
+	}
+
+	req, _ := http.NewRequest(http.MethodGet, "https://api.anthropic.com/api/oauth/usage", nil)
+	req.Header.Set("Authorization", "Bearer "+creds.ClaudeAiOauth.AccessToken)
+	req.Header.Set("anthropic-beta", "oauth-2025-04-20")
+
+	client := &http.Client{Timeout: 10 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return nil
+	}
+
+	var result struct {
+		FiveHour struct {
+			Utilization float64 `json:"utilization"`
+			ResetsAt    string  `json:"resets_at"`
+		} `json:"five_hour"`
+		SevenDay struct {
+			Utilization float64 `json:"utilization"`
+			ResetsAt    string  `json:"resets_at"`
+		} `json:"seven_day"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return nil
+	}
+
+	return &stats.ClaudeUsage{
+		FiveHourPercent: result.FiveHour.Utilization,
+		FiveHourReset:   result.FiveHour.ResetsAt,
+		SevenDayPercent: result.SevenDay.Utilization,
+		SevenDayReset:   result.SevenDay.ResetsAt,
+	}
+}
+
+func healthAPIHandler(store *stats.Store) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(store.Health())
+	}
 }
 
 func openBrowser(url string) {

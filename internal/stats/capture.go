@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"net/http"
+	"strconv"
 	"strings"
 )
 
@@ -69,6 +70,16 @@ func ExtractRequestModel(body []byte) string {
 	return req.Model
 }
 
+// RateLimitInfo holds rate limit state extracted from response headers.
+type RateLimitInfo struct {
+	RequestsRemaining int    `json:"requestsRemaining"`
+	RequestsReset     string `json:"requestsReset"`
+	TokensRemaining   int    `json:"tokensRemaining"`
+	TokensReset       string `json:"tokensReset"`
+	FiveHourReset     int64  `json:"fiveHourReset"`
+	SevenDayReset     int64  `json:"sevenDayReset"`
+}
+
 // UsageResult holds token usage, tool calls, and metadata extracted from a
 // proxied response.
 type UsageResult struct {
@@ -80,6 +91,8 @@ type UsageResult struct {
 	Streaming                bool
 	ToolUses                 []ToolUse
 	ResponseBlocks           []TimelineBlock
+	RateLimit                RateLimitInfo
+	APIKeyError              string
 }
 
 // pendingBlock accumulates streamed deltas for a content block (tool_use
@@ -129,10 +142,46 @@ func (c *CaptureWriter) Body() []byte {
 
 func (c *CaptureWriter) WriteHeader(code int) {
 	c.status = code
-	ct := c.ResponseWriter.Header().Get("Content-Type")
+	h := c.ResponseWriter.Header()
+	ct := h.Get("Content-Type")
 	c.isSSE = strings.Contains(ct, "text/event-stream")
 	c.result.Streaming = c.isSSE
+	c.result.RateLimit = RateLimitInfo{
+		RequestsRemaining: headerInt(h, "anthropic-ratelimit-requests-remaining"),
+		RequestsReset:     h.Get("anthropic-ratelimit-requests-reset"),
+		TokensRemaining:   headerInt(h, "anthropic-ratelimit-tokens-remaining"),
+		TokensReset:       h.Get("anthropic-ratelimit-tokens-reset"),
+		FiveHourReset:     headerInt64(h, "anthropic-ratelimit-unified-5h-reset"),
+		SevenDayReset:     headerInt64(h, "anthropic-ratelimit-unified-7d-reset"),
+	}
+	if code == 401 {
+		c.result.APIKeyError = "Unauthorized: invalid or missing API key"
+	}
 	c.ResponseWriter.WriteHeader(code)
+}
+
+func headerInt(h http.Header, key string) int {
+	v := h.Get(key)
+	if v == "" {
+		return 0
+	}
+	n, err := strconv.Atoi(v)
+	if err != nil {
+		return 0
+	}
+	return n
+}
+
+func headerInt64(h http.Header, key string) int64 {
+	v := h.Get(key)
+	if v == "" {
+		return 0
+	}
+	n, err := strconv.ParseInt(v, 10, 64)
+	if err != nil {
+		return 0
+	}
+	return n
 }
 
 func (c *CaptureWriter) Write(b []byte) (int, error) {
@@ -289,16 +338,27 @@ func (c *CaptureWriter) processLine(line []byte) {
 // buffered non-streaming body if needed.
 func (c *CaptureWriter) Finalize() UsageResult {
 	if !c.isSSE && c.bodyBuf.Len() > 0 {
+		body := c.bodyBuf.Bytes()
 		var resp nonStreamResponse
-		if err := json.Unmarshal(c.bodyBuf.Bytes(), &resp); err == nil {
+		if err := json.Unmarshal(body, &resp); err == nil {
 			c.result.Model = resp.Model
 			c.result.InputTokens = resp.Usage.InputTokens
 			c.result.OutputTokens = resp.Usage.OutputTokens
 			c.result.CacheCreationInputTokens = resp.Usage.CacheCreationInputTokens
 			c.result.CacheReadInputTokens = resp.Usage.CacheReadInputTokens
 		}
-		c.result.ToolUses = ExtractToolUses(c.bodyBuf.Bytes())
-		c.result.ResponseBlocks = BlocksFromResponse(c.bodyBuf.Bytes())
+		// Detect API key errors from non-streaming error responses.
+		if c.result.APIKeyError == "" {
+			if c.status == 403 {
+				c.result.APIKeyError = "Forbidden: check if your API key has funds or access"
+			} else if c.status == 429 {
+				c.result.APIKeyError = "Rate limited: your request was rejected (HTTP 429)"
+			} else if c.status == 529 {
+				c.result.APIKeyError = "Anthropic API overloaded (HTTP 529)"
+			}
+		}
+		c.result.ToolUses = ExtractToolUses(body)
+		c.result.ResponseBlocks = BlocksFromResponse(body)
 	}
 	return c.result
 }

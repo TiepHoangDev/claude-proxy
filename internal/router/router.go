@@ -39,6 +39,73 @@ type Config struct {
 	SystemInject *SystemInjectConfig `json:"system_inject"`
 }
 
+// DeepSeekBalanceResult holds the parsed result of a /user/balance query.
+type DeepSeekBalanceResult struct {
+	IsAvailable bool
+	Currency    string
+	Total       string
+}
+
+// Display returns a human-readable balance string.
+func (b *DeepSeekBalanceResult) Display() string {
+	if b == nil || b.Total == "" {
+		return ""
+	}
+	if b.IsAvailable {
+		return b.Total + " " + b.Currency
+	}
+	return b.Total + " " + b.Currency + " (unavailable)"
+}
+
+// FetchDeepSeekBalance calls the DeepSeek /user/balance endpoint and returns
+// the parsed balance info, or nil if the request fails.
+func FetchDeepSeekBalance(cfg *DeepSeekConfig) *DeepSeekBalanceResult {
+	if cfg == nil || cfg.APIKey == "" || cfg.BaseURL == "" {
+		return nil
+	}
+	u, err := url.Parse(cfg.BaseURL)
+	if err != nil {
+		return nil
+	}
+	req, err := http.NewRequest(http.MethodGet, u.Scheme+"://"+u.Host+"/user/balance", nil)
+	if err != nil {
+		return nil
+	}
+	req.Header.Set("Accept", "application/json")
+	req.Header.Set("x-api-key", cfg.APIKey)
+
+	client := &http.Client{Timeout: 5 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return nil
+	}
+
+	var result struct {
+		IsAvailable  bool `json:"is_available"`
+		BalanceInfos []struct {
+			Currency         string `json:"currency"`
+			TotalBalance     string `json:"total_balance"`
+			GrantedBalance   string `json:"granted_balance"`
+			ToppedUpBalance  string `json:"topped_up_balance"`
+		} `json:"balance_infos"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return nil
+	}
+
+	bal := &DeepSeekBalanceResult{IsAvailable: result.IsAvailable}
+	if len(result.BalanceInfos) > 0 {
+		bal.Currency = result.BalanceInfos[0].Currency
+		bal.Total = result.BalanceInfos[0].TotalBalance
+	}
+	return bal
+}
+
 // Target describes where and how a request should be forwarded.
 type Target struct {
 	Scheme       string

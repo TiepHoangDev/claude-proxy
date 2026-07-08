@@ -16,6 +16,14 @@ const INSTALLED_ASSET_KEY = "installedAsset";
  * the latest release (e.g. from the "check for update" command).
  */
 export async function ensureBinary(context: vscode.ExtensionContext, forceCheck = false): Promise<string> {
+  const devPath = vscode.workspace.getConfiguration("claudeProxy").get<string>("devBinary");
+  if (devPath && fs.existsSync(devPath)) {
+    if (process.platform !== "win32") {
+      await fs.promises.chmod(devPath, 0o755);
+    }
+    return devPath;
+  }
+
   const binDir = vscode.Uri.joinPath(context.globalStorageUri, "bin");
   await vscode.workspace.fs.createDirectory(binDir);
 

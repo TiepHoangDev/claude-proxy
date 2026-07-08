@@ -3,41 +3,72 @@ import * as vscode from "vscode";
 export type ProxyState = "downloading" | "starting" | "running" | "stopped" | "error";
 
 export class ProxyStatusBar {
-  private readonly item: vscode.StatusBarItem;
+  private readonly proxyItem: vscode.StatusBarItem;
+  private readonly healthItem: vscode.StatusBarItem;
+  private proxyState: ProxyState = "stopped";
+  private proxyPort = 0;
 
   constructor() {
-    this.item = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 100);
-    this.item.show();
+    this.proxyItem = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 100);
+    this.healthItem = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 90);
+    this.proxyItem.show();
+    this.healthItem.show();
     this.setStopped();
   }
 
   setDownloading(): void {
-    this.set("downloading", "$(cloud-download) Claude Proxy: Downloading…", undefined, "claudeProxy.showLogs");
+    this.proxyState = "downloading";
+    this.setProxy("$(cloud-download) Claude Proxy: Downloading…", undefined, "claudeProxy.showLogs");
   }
 
   setStarting(): void {
-    this.set("starting", "$(sync~spin) Claude Proxy: Starting…", undefined, "claudeProxy.showLogs");
+    this.proxyState = "starting";
+    this.setProxy("$(sync~spin) Claude Proxy: Starting…", undefined, "claudeProxy.showLogs");
   }
 
   setRunning(port: number): void {
-    this.set("running", `$(check) Claude Proxy :${port}`, `Running on port ${port} — click to open dashboard`, "claudeProxy.openDashboard");
+    this.proxyState = "running";
+    this.proxyPort = port;
+    this.setProxy(`$(check) Claude Proxy :${port}`, `Running on port ${port} — click to open dashboard`, "claudeProxy.openDashboard");
   }
 
   setStopped(): void {
-    this.set("stopped", "$(circle-slash) Claude Proxy: Stopped", "Click to start", "claudeProxy.start");
+    this.proxyState = "stopped";
+    this.proxyPort = 0;
+    this.setProxy("$(circle-slash) Claude Proxy: Stopped", "Click to start", "claudeProxy.start");
   }
 
   setError(message: string): void {
-    this.set("error", "$(warning) Claude Proxy: Error", message, "claudeProxy.showLogs");
+    this.proxyState = "error";
+    this.setProxy("$(warning) Claude Proxy: Error", message, "claudeProxy.showLogs");
+  }
+
+  setHealthWarning(text: string, tooltip: string): void {
+    this.healthItem.text = `$(warning) ${text}`;
+    this.healthItem.tooltip = tooltip;
+    this.healthItem.command = "claudeProxy.openDashboard";
+  }
+
+  setHealthRateLimit(text: string, tooltip: string): void {
+    this.healthItem.text = `$(dashboard) ${text}`;
+    this.healthItem.tooltip = tooltip;
+    this.healthItem.command = "claudeProxy.openDashboard";
+  }
+
+  clearHealth(): void {
+    this.healthItem.text = "$(dash) Usage: —";
+    this.healthItem.tooltip = "Usage data loads when the Claude usage API becomes available";
+    this.healthItem.command = "claudeProxy.openDashboard";
   }
 
   dispose(): void {
-    this.item.dispose();
+    this.proxyItem.dispose();
+    this.healthItem.dispose();
   }
 
-  private set(_state: ProxyState, text: string, tooltip: string | undefined, command: string): void {
-    this.item.text = text;
-    this.item.tooltip = tooltip;
-    this.item.command = command;
+  private setProxy(text: string, tooltip: string | undefined, command: string): void {
+    this.proxyItem.text = text;
+    this.proxyItem.tooltip = tooltip;
+    this.proxyItem.command = command;
   }
 }
