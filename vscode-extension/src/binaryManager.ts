@@ -63,6 +63,11 @@ export async function ensureBinary(context: vscode.ExtensionContext, forceCheck 
       }
       const tmpPath = `${destPath}.download`;
       await fs.promises.writeFile(tmpPath, Buffer.concat(chunks));
+      try {
+        await fs.promises.unlink(destPath);
+      } catch {
+        // file didn't exist or was locked — ignore
+      }
       await fs.promises.rename(tmpPath, destPath);
     }
   );

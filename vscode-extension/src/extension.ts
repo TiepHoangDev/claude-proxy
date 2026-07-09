@@ -169,7 +169,15 @@ export function activate(context: vscode.ExtensionContext): void {
     vscode.commands.registerCommand("claudeProxy.showLogs", () => output.show()),
     vscode.commands.registerCommand("claudeProxy.checkForUpdate", async () => {
       try {
+        const wasRunning = pm.isRunning;
+        if (wasRunning) {
+          stopCmd();
+          await new Promise((r) => setTimeout(r, 500));
+        }
         await ensureBinary(context, true);
+        if (wasRunning) {
+          await startCmd();
+        }
         vscode.window.showInformationMessage("Claude Proxy: binary is up to date.");
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err);

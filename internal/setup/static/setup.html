@@ -68,7 +68,29 @@ textarea { min-height: 4rem; resize: vertical; }
   </div>
 </div>
 
-<h2>3. System prompt injection (optional)</h2>
+<h2>3. OpenRouter routing (optional)</h2>
+<p class="hint">Redirect requests for models matching a substring to OpenRouter's Anthropic-compatible API.</p>
+<div class="row">
+  <label>API key
+    <input type="password" x-model="openrouter.api_key" placeholder="sk-or-v1-...">
+  </label>
+  <label>Base URL
+    <input type="text" x-model="openrouter.base_url" placeholder="https://openrouter.ai/api">
+  </label>
+  <label>Model (OpenRouter model slug)
+    <input type="text" x-model="openrouter.model" placeholder="anthropic/claude-haiku-4.5">
+  </label>
+  <label>Match (substring of requested model, case-insensitive)
+    <input type="text" x-model="openrouter.match" placeholder="haiku">
+  </label>
+  <div class="actions">
+    <button @click="testOpenRouter()" :disabled="testingOpenRouter">Test</button>
+    <button @click="save()" :disabled="saving">Save</button>
+    <span x-show="testOpenRouterResult" :class="testOpenRouterResult && testOpenRouterResult.ok ? 'result-ok' : 'result-err'" x-text="testOpenRouterResult && testOpenRouterResult.message"></span>
+  </div>
+</div>
+
+<h2>4. System prompt injection (optional)</h2>
 <p class="hint">Append extra text to the system prompt for requests whose model matches.</p>
 <div class="row">
   <label>Match (substring of requested model, case-insensitive)
@@ -83,7 +105,7 @@ textarea { min-height: 4rem; resize: vertical; }
   </div>
 </div>
 
-<h2>4. Revert to normal</h2>
+<h2>5. Revert to normal</h2>
 <p class="hint">Point Claude Code back at the real Anthropic API.</p>
 <template x-for="sh in shells" :key="sh.label + '-revert'">
 <div class="shell">
@@ -102,16 +124,20 @@ function setupPage() {
   return {
     status: { os: '', port: '', proxyUrl: '', configured: false, config: {} },
     deepseek: { api_key: '', base_url: 'https://api.deepseek.com/anthropic', model: 'deepseek-v4-pro', match: 'haiku' },
+    openrouter: { api_key: '', base_url: 'https://openrouter.ai/api', model: 'anthropic/claude-haiku-4.5', match: 'haiku' },
     systemInject: { match: 'haiku', text: 'If you need clarification or a decision before continuing, stop and return the question as your final result instead of guessing.' },
     testResult: null,
+    testOpenRouterResult: null,
     saveResult: null,
     testing: false,
+    testingOpenRouter: false,
     saving: false,
     async init() {
       const res = await fetch('/_proxy/api/setup/status');
       this.status = await res.json();
       const cfg = this.status.config || {};
       if (cfg.deepseek) this.deepseek = { ...this.deepseek, ...cfg.deepseek };
+      if (cfg.openrouter) this.openrouter = { ...this.openrouter, ...cfg.openrouter };
       if (cfg.system_inject) this.systemInject = { ...this.systemInject, ...cfg.system_inject };
     },
     get shells() {
@@ -140,11 +166,25 @@ function setupPage() {
         this.testing = false;
       }
     },
+    async testOpenRouter() {
+      this.testingOpenRouter = true;
+      this.testOpenRouterResult = null;
+      try {
+        const res = await fetch('/_proxy/api/setup/test-openrouter', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(this.openrouter),
+        });
+        this.testOpenRouterResult = await res.json();
+      } finally {
+        this.testingOpenRouter = false;
+      }
+    },
     async save() {
       this.saving = true;
       this.saveResult = null;
       try {
-        const cfg = { deepseek: this.deepseek, system_inject: this.systemInject };
+        const cfg = { deepseek: this.deepseek, openrouter: this.openrouter, system_inject: this.systemInject };
         const res = await fetch('/_proxy/api/setup/save', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },

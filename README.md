@@ -10,7 +10,8 @@ dashboard for inspection.
 - Per-request tracking of input/output/cache tokens, model, status, duration, and tool calls
 - Live dashboard with request list and per-request conversation timeline
 - Optional routing rules (`config.json`): redirect matching models to an
-  alternate provider (e.g. DeepSeek) and/or inject extra system-prompt text
+  alternate provider (DeepSeek and/or OpenRouter) and/or inject extra
+  system-prompt text
 
 ## Demo
 

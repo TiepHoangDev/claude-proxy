@@ -93,3 +93,17 @@ func TestDeepSeekAPIHandler() http.HandlerFunc {
 		writeResult(w, ok, msg)
 	}
 }
+
+// TestOpenRouterAPIHandler decodes a router.OpenRouterConfig from the
+// request body and verifies that the configured endpoint and API key work.
+func TestOpenRouterAPIHandler() http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		var cfg router.OpenRouterConfig
+		if err := json.NewDecoder(r.Body).Decode(&cfg); err != nil {
+			writeResult(w, false, "invalid request body: "+err.Error())
+			return
+		}
+		ok, msg := router.TestOpenRouter(&cfg)
+		writeResult(w, ok, msg)
+	}
+}

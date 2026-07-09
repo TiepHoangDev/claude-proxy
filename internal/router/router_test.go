@@ -46,6 +46,42 @@ func TestResolveCaseInsensitive(t *testing.T) {
 	}
 }
 
+func TestResolveMatchesOpenRouter(t *testing.T) {
+	c := &Config{
+		OpenRouter: &OpenRouterConfig{
+			APIKey:  "sk-or-test",
+			BaseURL: "https://openrouter.ai/api",
+			Model:   "anthropic/claude-haiku-4.5",
+			Match:   "haiku",
+		},
+	}
+	target := c.Resolve("/v1/messages", "claude-haiku-4-5-20251001")
+	if target == nil {
+		t.Fatal("expected non-nil target for haiku model")
+	}
+	if target.Scheme != "https" || target.Host != "openrouter.ai" {
+		t.Errorf("unexpected scheme/host: %s %s", target.Scheme, target.Host)
+	}
+	if target.PathPrefix != "/api" {
+		t.Errorf("unexpected path prefix: %q", target.PathPrefix)
+	}
+	if target.APIKeyHeader != "Authorization" || target.APIKey != "Bearer sk-or-test" {
+		t.Errorf("unexpected api key header/value: %s %s", target.APIKeyHeader, target.APIKey)
+	}
+	if target.Model != "anthropic/claude-haiku-4.5" {
+		t.Errorf("unexpected model: %s", target.Model)
+	}
+}
+
+func TestResolveDeepSeekPriorityOverOpenRouter(t *testing.T) {
+	c := testConfig()
+	c.OpenRouter = &OpenRouterConfig{APIKey: "sk-or-test", BaseURL: "https://openrouter.ai/api", Model: "anthropic/claude-haiku-4.5", Match: "haiku"}
+	target := c.Resolve("/v1/messages", "claude-haiku-4-5-20251001")
+	if target == nil || target.Host != "api.deepseek.com" {
+		t.Errorf("expected DeepSeek to take priority, got %+v", target)
+	}
+}
+
 func TestResolveNoMatchModel(t *testing.T) {
 	c := testConfig()
 	if target := c.Resolve("/v1/messages", "claude-sonnet-4-5-20251001"); target != nil {
@@ -308,5 +344,51 @@ func TestTestDeepSeekMissingFields(t *testing.T) {
 	ok, _ := TestDeepSeek(&DeepSeekConfig{})
 	if ok {
 		t.Error("expected ok=false for empty config")
+	}
+}
+
+func TestTestOpenRouterSuccess(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("Authorization") != "Bearer sk-or-test" {
+			t.Errorf("missing or wrong Authorization header: %q", r.Header.Get("Authorization"))
+		}
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte(`{"id":"msg_1"}`))
+	}))
+	defer srv.Close()
+
+	ok, msg := TestOpenRouter(&OpenRouterConfig{APIKey: "sk-or-test", BaseURL: srv.URL, Model: "anthropic/claude-haiku-4.5"})
+	if !ok {
+		t.Errorf("expected ok=true, got message %q", msg)
+	}
+}
+
+func TestTestOpenRouterInvalidKey(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusUnauthorized)
+		w.Write([]byte(`{"error":"invalid api key"}`))
+	}))
+	defer srv.Close()
+
+	ok, msg := TestOpenRouter(&OpenRouterConfig{APIKey: "sk-or-bad", BaseURL: srv.URL, Model: "anthropic/claude-haiku-4.5"})
+	if ok {
+		t.Errorf("expected ok=false, got ok=true with message %q", msg)
+	}
+}
+
+func TestTestOpenRouterMissingFields(t *testing.T) {
+	ok, _ := TestOpenRouter(&OpenRouterConfig{})
+	if ok {
+		t.Error("expected ok=false for empty config")
+	}
+}
+
+func TestTestOpenRouterMissingModel(t *testing.T) {
+	ok, msg := TestOpenRouter(&OpenRouterConfig{APIKey: "sk-or-test", BaseURL: "https://openrouter.ai/api"})
+	if ok {
+		t.Error("expected ok=false when model is missing")
+	}
+	if msg == "" {
+		t.Error("expected a message explaining the missing model")
 	}
 }

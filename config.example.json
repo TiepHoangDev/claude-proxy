@@ -5,6 +5,12 @@
     "model": "deepseek-v4-pro",
     "match": "haiku"
   },
+  "openrouter": {
+    "api_key": "sk-or-v1-your-openrouter-api-key",
+    "base_url": "https://openrouter.ai/api",
+    "model": "anthropic/claude-haiku-4.5",
+    "match": "haiku"
+  },
   "system_inject": {
     "match": "haiku",
     "text": "If you need clarification or a decision before continuing, stop and return the question as your final result instead of guessing."

@@ -1,6 +1,7 @@
 // Package router decides whether a request should be forwarded to an
-// alternate API provider (e.g. DeepSeek) instead of api.anthropic.com,
-// based on the request path and the model field in the request body.
+// alternate API provider (e.g. DeepSeek, OpenRouter) instead of
+// api.anthropic.com, based on the request path and the model field in the
+// request body.
 package router
 
 import (
@@ -26,6 +27,15 @@ type DeepSeekConfig struct {
 	Match   string `json:"match"`
 }
 
+// OpenRouterConfig holds the settings for routing requests to OpenRouter's
+// Anthropic-compatible API (https://openrouter.ai/api/v1/messages).
+type OpenRouterConfig struct {
+	APIKey  string `json:"api_key"`
+	BaseURL string `json:"base_url"`
+	Model   string `json:"model"`
+	Match   string `json:"match"`
+}
+
 // SystemInjectConfig holds settings for appending extra text to the
 // "system" prompt of requests whose model matches Match.
 type SystemInjectConfig struct {
@@ -33,9 +43,12 @@ type SystemInjectConfig struct {
 	Text  string `json:"text"`
 }
 
-// Config is the top-level routing configuration.
+// Config is the top-level routing configuration. When both DeepSeek and
+// OpenRouter are configured and both match a request's model, DeepSeek
+// takes priority.
 type Config struct {
 	DeepSeek     *DeepSeekConfig     `json:"deepseek"`
+	OpenRouter   *OpenRouterConfig   `json:"openrouter"`
 	SystemInject *SystemInjectConfig `json:"system_inject"`
 }
 
@@ -134,13 +147,16 @@ func Load(path string) (*Config, error) {
 	return &cfg, nil
 }
 
-// Save normalizes cfg (clearing the DeepSeek/SystemInject sections if all of
-// their fields are empty, so Resolve/InjectSystem treat them as disabled)
-// and writes it as indented JSON to path.
+// Save normalizes cfg (clearing the DeepSeek/OpenRouter/SystemInject
+// sections if all of their fields are empty, so Resolve/InjectSystem treat
+// them as disabled) and writes it as indented JSON to path.
 func Save(path string, cfg *Config) error {
 	normalized := *cfg
 	if normalized.DeepSeek != nil && *normalized.DeepSeek == (DeepSeekConfig{}) {
 		normalized.DeepSeek = nil
+	}
+	if normalized.OpenRouter != nil && *normalized.OpenRouter == (OpenRouterConfig{}) {
+		normalized.OpenRouter = nil
 	}
 	if normalized.SystemInject != nil && *normalized.SystemInject == (SystemInjectConfig{}) {
 		normalized.SystemInject = nil
@@ -196,12 +212,31 @@ func TestDeepSeek(cfg *DeepSeekConfig) (ok bool, message string) {
 	if cfg == nil || cfg.APIKey == "" || cfg.BaseURL == "" {
 		return false, "API key and base URL are required"
 	}
-
 	model := cfg.Model
 	if model == "" {
 		model = "deepseek-chat"
 	}
+	return testAnthropicCompatible(cfg.BaseURL, model, "x-api-key", cfg.APIKey)
+}
 
+// TestOpenRouter sends a minimal Messages API request to cfg's base URL to
+// verify that the API key and endpoint work. It always returns a
+// human-readable message; ok is true only for a successful (200) response.
+func TestOpenRouter(cfg *OpenRouterConfig) (ok bool, message string) {
+	if cfg == nil || cfg.APIKey == "" || cfg.BaseURL == "" {
+		return false, "API key and base URL are required"
+	}
+	if cfg.Model == "" {
+		return false, "model is required (e.g. anthropic/claude-haiku-4.5)"
+	}
+	return testAnthropicCompatible(cfg.BaseURL, cfg.Model, "Authorization", "Bearer "+cfg.APIKey)
+}
+
+// testAnthropicCompatible sends a minimal Messages API request to
+// baseURL+"/v1/messages", authenticating with headerName: headerValue. It
+// always returns a human-readable message; ok is true only for a
+// successful (200) response.
+func testAnthropicCompatible(baseURL, model, headerName, headerValue string) (ok bool, message string) {
 	body, err := json.Marshal(map[string]any{
 		"model":      model,
 		"max_tokens": 1,
@@ -211,12 +246,12 @@ func TestDeepSeek(cfg *DeepSeekConfig) (ok bool, message string) {
 		return false, fmt.Sprintf("failed to build test request: %v", err)
 	}
 
-	req, err := http.NewRequest(http.MethodPost, strings.TrimRight(cfg.BaseURL, "/")+"/v1/messages", bytes.NewReader(body))
+	req, err := http.NewRequest(http.MethodPost, strings.TrimRight(baseURL, "/")+"/v1/messages", bytes.NewReader(body))
 	if err != nil {
 		return false, fmt.Sprintf("invalid base URL: %v", err)
 	}
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("x-api-key", cfg.APIKey)
+	req.Header.Set(headerName, headerValue)
 	req.Header.Set("anthropic-version", "2023-06-01")
 
 	client := &http.Client{Timeout: 10 * time.Second}
@@ -238,32 +273,42 @@ func TestDeepSeek(cfg *DeepSeekConfig) (ok bool, message string) {
 	}
 }
 
-// Resolve returns a non-nil *Target if path/model should be routed to
-// DeepSeek, or nil if the request should go to api.anthropic.com as usual.
+// Resolve returns a non-nil *Target if path/model should be routed to an
+// alternate provider (DeepSeek is checked before OpenRouter when both are
+// configured and match), or nil if the request should go to
+// api.anthropic.com as usual.
 func (c *Config) Resolve(path, model string) *Target {
-	if c == nil || c.DeepSeek == nil {
-		return nil
-	}
-	if path != "/v1/messages" {
-		return nil
-	}
-	if c.DeepSeek.Match == "" || !strings.Contains(strings.ToLower(model), strings.ToLower(c.DeepSeek.Match)) {
+	if c == nil || path != "/v1/messages" {
 		return nil
 	}
 
-	u, err := url.Parse(c.DeepSeek.BaseURL)
-	if err != nil {
-		return nil
+	if c.DeepSeek != nil && c.DeepSeek.Match != "" && strings.Contains(strings.ToLower(model), strings.ToLower(c.DeepSeek.Match)) {
+		if u, err := url.Parse(c.DeepSeek.BaseURL); err == nil {
+			return &Target{
+				Scheme:       u.Scheme,
+				Host:         u.Host,
+				PathPrefix:   u.Path,
+				APIKeyHeader: "x-api-key",
+				APIKey:       c.DeepSeek.APIKey,
+				Model:        c.DeepSeek.Model,
+			}
+		}
 	}
 
-	return &Target{
-		Scheme:       u.Scheme,
-		Host:         u.Host,
-		PathPrefix:   u.Path,
-		APIKeyHeader: "x-api-key",
-		APIKey:       c.DeepSeek.APIKey,
-		Model:        c.DeepSeek.Model,
+	if c.OpenRouter != nil && c.OpenRouter.Match != "" && strings.Contains(strings.ToLower(model), strings.ToLower(c.OpenRouter.Match)) {
+		if u, err := url.Parse(c.OpenRouter.BaseURL); err == nil {
+			return &Target{
+				Scheme:       u.Scheme,
+				Host:         u.Host,
+				PathPrefix:   u.Path,
+				APIKeyHeader: "Authorization",
+				APIKey:       "Bearer " + c.OpenRouter.APIKey,
+				Model:        c.OpenRouter.Model,
+			}
+		}
 	}
+
+	return nil
 }
 
 // RewriteModel returns body with its top-level "model" field replaced by
