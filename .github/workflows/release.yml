@@ -90,6 +90,12 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: "20"
+      - name: Sync version
+        run: |
+          TAG="${{ needs.tag.outputs.version }}"
+          VER="${TAG#v}"
+          cd vscode-extension
+          npm version "$VER" --no-git-tag-version --allow-same-version
       - name: Build VSIX
         run: |
           cd vscode-extension
@@ -136,3 +142,23 @@ jobs:
           gh release create "$VERSION" dist/* \
             --title "$VERSION" \
             --generate-notes
+
+  publish:
+    needs: [release, tag]
+    runs-on: ubuntu-latest
+    if: ${{ !cancelled() && needs.release.result == 'success' }}
+    steps:
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - uses: actions/download-artifact@v4
+        with:
+          name: vsix
+          path: dist
+      - name: Publish to VS Code Marketplace
+        env:
+          VSCE_PAT: ${{ secrets.VSCE_PAT }}
+        run: |
+          npx @vscode/vsce publish \
+            --packagePath dist/*.vsix \
+            --pat "$VSCE_PAT"

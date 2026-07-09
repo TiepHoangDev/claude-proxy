@@ -4,7 +4,6 @@
   "description": "Start, stop, and configure the claude-proxy reverse proxy without leaving VSCode.",
   "version": "0.1.0",
   "publisher": "TiepHoangDev",
-  "private": true,
   "repository": {
     "type": "git",
     "url": "https://github.com/TiepHoangDev/claude-proxy"
