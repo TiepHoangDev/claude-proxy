@@ -1,5 +1,6 @@
 /build/
 /config.json
+/server.pid
 /vscode-extension/node_modules/
 /vscode-extension/out/
 /vscode-extension/*.vsix

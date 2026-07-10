@@ -119,6 +119,7 @@ func main() {
 	mux.HandleFunc("/_proxy/api/setup/save", setup.SaveAPIHandler(routerHolder))
 	mux.HandleFunc("/_proxy/api/setup/test-deepseek", setup.TestDeepSeekAPIHandler())
 	mux.HandleFunc("/_proxy/api/setup/test-openrouter", setup.TestOpenRouterAPIHandler())
+	mux.HandleFunc("/_proxy/api/setup/models", setup.ModelsAPIHandler())
 	mux.HandleFunc("/_proxy/api/health", healthAPIHandler(store))
 	mux.HandleFunc("/", statsMiddleware(store, reqLogger, toolLogger, routerHolder, proxy))
 

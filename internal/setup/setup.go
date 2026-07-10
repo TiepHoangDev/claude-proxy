@@ -107,3 +107,29 @@ func TestOpenRouterAPIHandler() http.HandlerFunc {
 		writeResult(w, ok, msg)
 	}
 }
+
+type modelsResponse struct {
+	OK      bool     `json:"ok"`
+	Models  []string `json:"models,omitempty"`
+	Message string   `json:"message,omitempty"`
+}
+
+// ModelsAPIHandler returns the list of model slugs available for provider
+// (currently only "openrouter" is supported; other providers don't expose a
+// public model-listing endpoint).
+func ModelsAPIHandler() http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Query().Get("provider") {
+		case "openrouter":
+			models, err := router.FetchOpenRouterModels(r.URL.Query().Get("base_url"))
+			if err != nil {
+				_ = json.NewEncoder(w).Encode(modelsResponse{OK: false, Message: err.Error()})
+				return
+			}
+			_ = json.NewEncoder(w).Encode(modelsResponse{OK: true, Models: models})
+		default:
+			_ = json.NewEncoder(w).Encode(modelsResponse{OK: false, Message: "unsupported provider"})
+		}
+	}
+}

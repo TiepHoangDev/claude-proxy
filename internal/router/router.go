@@ -12,6 +12,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -230,6 +231,45 @@ func TestOpenRouter(cfg *OpenRouterConfig) (ok bool, message string) {
 		return false, "model is required (e.g. anthropic/claude-haiku-4.5)"
 	}
 	return testAnthropicCompatible(cfg.BaseURL, cfg.Model, "Authorization", "Bearer "+cfg.APIKey)
+}
+
+// FetchOpenRouterModels queries OpenRouter's public model catalog and
+// returns all model slugs, sorted alphabetically (which also groups them by
+// provider prefix, e.g. "anthropic/...", "openai/...", since the slug is
+// "provider/model"). No API key is required for this endpoint.
+func FetchOpenRouterModels(baseURL string) ([]string, error) {
+	if baseURL == "" {
+		baseURL = "https://openrouter.ai/api"
+	}
+	u := strings.TrimRight(baseURL, "/") + "/v1/models"
+
+	client := &http.Client{Timeout: 10 * time.Second}
+	resp, err := client.Get(u)
+	if err != nil {
+		return nil, fmt.Errorf("request failed: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, 1024))
+		return nil, fmt.Errorf("unexpected response: HTTP %d: %s", resp.StatusCode, strings.TrimSpace(string(body)))
+	}
+
+	var result struct {
+		Data []struct {
+			ID string `json:"id"`
+		} `json:"data"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return nil, fmt.Errorf("invalid response: %w", err)
+	}
+
+	models := make([]string, 0, len(result.Data))
+	for _, m := range result.Data {
+		models = append(models, m.ID)
+	}
+	sort.Strings(models)
+	return models, nil
 }
 
 // testAnthropicCompatible sends a minimal Messages API request to

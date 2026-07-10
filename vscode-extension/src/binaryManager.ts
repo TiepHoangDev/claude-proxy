@@ -8,12 +8,15 @@ interface InstalledAsset {
 }
 
 const INSTALLED_ASSET_KEY = "installedAsset";
+const ACTIVATED_EXTENSION_VERSION_KEY = "activatedExtensionVersion";
 
 /**
  * Ensures a claude-proxy binary is present under the extension's global
  * storage and returns its path. Uses the cached globalState entry to avoid
  * hitting the GitHub API on every activation; pass forceCheck to re-resolve
- * the latest release (e.g. from the "check for update" command).
+ * the latest release (e.g. from the "check for update" command). Also force
+ * a re-check the first time a newly-updated extension version activates, so
+ * a VS Code extension update pulls the matching binary release automatically.
  */
 export async function ensureBinary(context: vscode.ExtensionContext, forceCheck = false): Promise<string> {
   const devPath = vscode.workspace.getConfiguration("claudeProxy").get<string>("devBinary");
@@ -26,6 +29,12 @@ export async function ensureBinary(context: vscode.ExtensionContext, forceCheck 
 
   const binDir = vscode.Uri.joinPath(context.globalStorageUri, "bin");
   await vscode.workspace.fs.createDirectory(binDir);
+
+  const extensionVersion = context.extension.packageJSON.version as string;
+  const lastActivatedVersion = context.globalState.get<string>(ACTIVATED_EXTENSION_VERSION_KEY);
+  if (lastActivatedVersion !== extensionVersion) {
+    forceCheck = true;
+  }
 
   const installed = context.globalState.get<InstalledAsset>(INSTALLED_ASSET_KEY);
   if (installed && !forceCheck) {
@@ -40,6 +49,7 @@ export async function ensureBinary(context: vscode.ExtensionContext, forceCheck 
 
   if (fs.existsSync(destPath) && installed?.tag === asset.tag) {
     await context.globalState.update(INSTALLED_ASSET_KEY, { tag: asset.tag, name: asset.name });
+    await context.globalState.update(ACTIVATED_EXTENSION_VERSION_KEY, extensionVersion);
     return destPath;
   }
 
@@ -77,5 +87,6 @@ export async function ensureBinary(context: vscode.ExtensionContext, forceCheck 
   }
 
   await context.globalState.update(INSTALLED_ASSET_KEY, { tag: asset.tag, name: asset.name });
+  await context.globalState.update(ACTIVATED_EXTENSION_VERSION_KEY, extensionVersion);
   return destPath;
 }

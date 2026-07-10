@@ -15,6 +15,7 @@ function terminalEnvConfigKey(): string {
 }
 
 let previousBaseUrl: string | undefined;
+let activeProcessManager: ProcessManager | undefined;
 
 function setAnthropicBaseUrl(port: number): void {
   const key = terminalEnvConfigKey();
@@ -35,6 +36,7 @@ export function activate(context: vscode.ExtensionContext): void {
   const output = vscode.window.createOutputChannel("Claude Proxy");
   const statusBar = new ProxyStatusBar();
   const pm = new ProcessManager(output);
+  activeProcessManager = pm;
   pm.onExit = () => {
     statusBar.setStopped();
     unsetAnthropicBaseUrl();
@@ -192,5 +194,7 @@ export function activate(context: vscode.ExtensionContext): void {
 }
 
 export function deactivate(): void {
+  activeProcessManager?.stop();
+  activeProcessManager = undefined;
   unsetAnthropicBaseUrl();
 }

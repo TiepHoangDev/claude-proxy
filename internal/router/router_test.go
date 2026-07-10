@@ -392,3 +392,44 @@ func TestTestOpenRouterMissingModel(t *testing.T) {
 		t.Error("expected a message explaining the missing model")
 	}
 }
+
+func TestFetchOpenRouterModelsReturnsAllSorted(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v1/models" {
+			t.Errorf("unexpected path: %s", r.URL.Path)
+		}
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte(`{"data":[
+			{"id":"anthropic/claude-sonnet-4.5"},
+			{"id":"openai/gpt-5"},
+			{"id":"anthropic/claude-haiku-4.5"}
+		]}`))
+	}))
+	defer srv.Close()
+
+	models, err := FetchOpenRouterModels(srv.URL)
+	if err != nil {
+		t.Fatalf("FetchOpenRouterModels error: %v", err)
+	}
+	want := []string{"anthropic/claude-haiku-4.5", "anthropic/claude-sonnet-4.5", "openai/gpt-5"}
+	if len(models) != len(want) {
+		t.Fatalf("models = %v, want %v", models, want)
+	}
+	for i := range want {
+		if models[i] != want[i] {
+			t.Errorf("models[%d] = %q, want %q", i, models[i], want[i])
+		}
+	}
+}
+
+func TestFetchOpenRouterModelsErrorStatus(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+		w.Write([]byte("boom"))
+	}))
+	defer srv.Close()
+
+	if _, err := FetchOpenRouterModels(srv.URL); err == nil {
+		t.Error("expected error for non-200 response")
+	}
+}

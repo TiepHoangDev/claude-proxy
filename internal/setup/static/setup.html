@@ -23,7 +23,17 @@ input[type=text], input[type=password], textarea {
   padding: 0.4rem; font-family: monospace; margin-top: 0.15rem;
 }
 textarea { min-height: 4rem; resize: vertical; }
+select {
+  width: 100%; box-sizing: border-box; background: #111; color: #ddd; border: 1px solid #444;
+  padding: 0.4rem; font-family: monospace; margin-top: 0.15rem;
+}
+select:disabled { opacity: 0.6; }
 .row { margin-bottom: 0.75rem; }
+.cols-2 { display: flex; gap: 0.75rem; }
+.cols-2 > label { flex: 1; }
+.inline-row { display: flex; gap: 0.5rem; align-items: stretch; }
+.inline-row select { flex: 1; }
+.inline-row button { flex: 0 0 auto; }
 .actions { margin-top: 0.75rem; display: flex; gap: 0.5rem; align-items: center; }
 .result-ok { color: #6f9; }
 .result-err { color: #f66; }
@@ -34,63 +44,73 @@ textarea { min-height: 4rem; resize: vertical; }
 <p><a href="/_proxy/dashboard">&larr; back to dashboard</a></p>
 <h1>Claude Proxy Setup</h1>
 
-<h2>1. Connect Claude Code to this proxy</h2>
-<p class="hint">Run one of these in the shell where you use Claude Code, then start (or restart) it.</p>
-<template x-for="sh in shells" :key="sh.label">
-<div class="shell">
-  <div class="shell-label" x-text="sh.label"></div>
-  <div class="cmd-row">
-    <pre x-text="sh.connect"></pre>
-    <button @click="copy(sh.connect)">Copy</button>
-  </div>
-</div>
-</template>
-
-<h2>2. DeepSeek routing (optional)</h2>
-<p class="hint">Redirect requests for models matching a substring to DeepSeek's Anthropic-compatible API.</p>
+<h2>1. Alternate provider routing (optional)</h2>
+<p class="hint">Redirect requests for models matching a substring to an Anthropic-compatible API.</p>
 <div class="row">
+  <div class="cols-2">
+    <label>API type
+      <select disabled>
+        <option>Anthropic-compatible API</option>
+      </select>
+    </label>
+    <label>Provider
+      <select x-model="activeProvider">
+        <option value="deepseek">DeepSeek</option>
+        <option value="openrouter">OpenRouter</option>
+      </select>
+    </label>
+  </div>
   <label>API key
-    <input type="password" x-model="deepseek.api_key" placeholder="sk-...">
+    <input type="password" x-model="current().api_key" :placeholder="activeProvider === 'deepseek' ? 'sk-...' : 'sk-or-v1-...'">
   </label>
   <label>Base URL
-    <input type="text" x-model="deepseek.base_url" placeholder="https://api.deepseek.com/anthropic">
+    <input type="text" x-model="current().base_url">
   </label>
-  <label>Model
-    <input type="text" x-model="deepseek.model" placeholder="deepseek-v4-pro">
+  <label x-show="activeProvider === 'deepseek'">Model
+    <select x-model="deepseek.modelPreset" @change="if (deepseek.modelPreset !== '__custom__') deepseek.model = deepseek.modelPreset">
+      <template x-for="m in deepseekModels" :key="m">
+        <option :value="m" x-text="m"></option>
+      </template>
+      <option value="__custom__">Custom…</option>
+    </select>
+    <input x-show="deepseek.modelPreset === '__custom__'" type="text" x-model="deepseek.model" placeholder="model id">
   </label>
-  <label>Match (substring of requested model, case-insensitive)
-    <input type="text" x-model="deepseek.match" placeholder="haiku">
+  <label x-show="activeProvider === 'openrouter'">Model (OpenRouter model slug)
+    <div class="inline-row">
+      <select x-ref="openrouterModelSelect" x-model="openrouter.modelPreset" @change="if (openrouter.modelPreset !== '__custom__') openrouter.model = openrouter.modelPreset">
+        <template x-for="group in openrouterModelGroups" :key="group.provider">
+          <optgroup :label="group.provider">
+            <template x-for="m in group.models" :key="m">
+              <option :value="m" x-text="m"></option>
+            </template>
+          </optgroup>
+        </template>
+        <option value="__custom__">Custom…</option>
+      </select>
+      <button type="button" @click="fetchOpenRouterModels()" :disabled="openrouterModelsLoading" title="Refresh model list from OpenRouter">&#8635;</button>
+    </div>
+    <input x-show="openrouter.modelPreset === '__custom__'" type="text" x-model="openrouter.model" placeholder="anthropic/claude-haiku-4.5">
+    <span class="hint" x-show="openrouterModelsLoading">Loading models from OpenRouter…</span>
+    <span class="result-err" x-show="openrouterModelsError" x-text="openrouterModelsError"></span>
+  </label>
+  <label>Match (requested model must contain this, case-insensitive)
+    <select x-model="current().matchPreset" @change="if (current().matchPreset !== '__custom__') current().match = current().matchPreset">
+      <template x-for="m in matchOptions" :key="m">
+        <option :value="m" x-text="m"></option>
+      </template>
+      <option value="__custom__">Custom…</option>
+    </select>
+    <input x-show="current().matchPreset === '__custom__'" type="text" x-model="current().match" placeholder="haiku">
   </label>
   <div class="actions">
-    <button @click="testDeepSeek()" :disabled="testing">Test</button>
+    <button @click="test()" :disabled="testing">Test</button>
     <button @click="save()" :disabled="saving">Save</button>
     <span x-show="testResult" :class="testResult && testResult.ok ? 'result-ok' : 'result-err'" x-text="testResult && testResult.message"></span>
   </div>
+  <p class="hint">Both DeepSeek and OpenRouter can be configured — switch the Provider dropdown to edit the other one. Save writes both at once; DeepSeek takes priority when both match a request.</p>
 </div>
 
-<h2>3. OpenRouter routing (optional)</h2>
-<p class="hint">Redirect requests for models matching a substring to OpenRouter's Anthropic-compatible API.</p>
-<div class="row">
-  <label>API key
-    <input type="password" x-model="openrouter.api_key" placeholder="sk-or-v1-...">
-  </label>
-  <label>Base URL
-    <input type="text" x-model="openrouter.base_url" placeholder="https://openrouter.ai/api">
-  </label>
-  <label>Model (OpenRouter model slug)
-    <input type="text" x-model="openrouter.model" placeholder="anthropic/claude-haiku-4.5">
-  </label>
-  <label>Match (substring of requested model, case-insensitive)
-    <input type="text" x-model="openrouter.match" placeholder="haiku">
-  </label>
-  <div class="actions">
-    <button @click="testOpenRouter()" :disabled="testingOpenRouter">Test</button>
-    <button @click="save()" :disabled="saving">Save</button>
-    <span x-show="testOpenRouterResult" :class="testOpenRouterResult && testOpenRouterResult.ok ? 'result-ok' : 'result-err'" x-text="testOpenRouterResult && testOpenRouterResult.message"></span>
-  </div>
-</div>
-
-<h2>4. System prompt injection (optional)</h2>
+<h2>2. System prompt injection (optional)</h2>
 <p class="hint">Append extra text to the system prompt for requests whose model matches.</p>
 <div class="row">
   <label>Match (substring of requested model, case-insensitive)
@@ -105,33 +125,43 @@ textarea { min-height: 4rem; resize: vertical; }
   </div>
 </div>
 
-<h2>5. Revert to normal</h2>
-<p class="hint">Point Claude Code back at the real Anthropic API.</p>
-<template x-for="sh in shells" :key="sh.label + '-revert'">
-<div class="shell">
-  <div class="shell-label" x-text="sh.label"></div>
-  <div class="cmd-row">
-    <pre x-text="sh.revert"></pre>
-    <button @click="copy(sh.revert)">Copy</button>
-  </div>
-</div>
-</template>
-
 <p><a href="/_proxy/dashboard">Go to dashboard &rarr;</a></p>
 
 <script>
 function setupPage() {
   return {
     status: { os: '', port: '', proxyUrl: '', configured: false, config: {} },
-    deepseek: { api_key: '', base_url: 'https://api.deepseek.com/anthropic', model: 'deepseek-v4-pro', match: 'haiku' },
-    openrouter: { api_key: '', base_url: 'https://openrouter.ai/api', model: 'anthropic/claude-haiku-4.5', match: 'haiku' },
+    activeProvider: 'deepseek',
+    deepseek: { api_key: '', base_url: 'https://api.deepseek.com/anthropic', model: 'deepseek-v4-pro', match: 'haiku', modelPreset: 'deepseek-v4-pro', matchPreset: 'haiku' },
+    openrouter: { api_key: '', base_url: 'https://openrouter.ai/api', model: 'anthropic/claude-haiku-4.5', match: 'haiku', modelPreset: 'anthropic/claude-haiku-4.5', matchPreset: 'haiku' },
     systemInject: { match: 'haiku', text: 'If you need clarification or a decision before continuing, stop and return the question as your final result instead of guessing.' },
+    deepseekModels: ['deepseek-chat', 'deepseek-reasoner', 'deepseek-v4-pro'],
+    openrouterModels: ['anthropic/claude-haiku-4.5', 'anthropic/claude-sonnet-4.5', 'anthropic/claude-opus-4.5'],
+    matchOptions: ['haiku', 'sonnet', 'opus'],
+    openrouterModelsLoading: false,
+    openrouterModelsError: null,
     testResult: null,
-    testOpenRouterResult: null,
     saveResult: null,
     testing: false,
-    testingOpenRouter: false,
     saving: false,
+    current() {
+      return this.activeProvider === 'deepseek' ? this.deepseek : this.openrouter;
+    },
+    get openrouterModelGroups() {
+      // openrouterModels is sorted alphabetically, which also groups slugs
+      // by their "provider/" prefix, so a single pass builds the groups.
+      const groups = [];
+      let current = null;
+      for (const m of this.openrouterModels) {
+        const provider = m.includes('/') ? m.slice(0, m.indexOf('/')) : 'other';
+        if (!current || current.provider !== provider) {
+          current = { provider, models: [] };
+          groups.push(current);
+        }
+        current.models.push(m);
+      }
+      return groups;
+    },
     async init() {
       const res = await fetch('/_proxy/api/setup/status');
       this.status = await res.json();
@@ -139,45 +169,51 @@ function setupPage() {
       if (cfg.deepseek) this.deepseek = { ...this.deepseek, ...cfg.deepseek };
       if (cfg.openrouter) this.openrouter = { ...this.openrouter, ...cfg.openrouter };
       if (cfg.system_inject) this.systemInject = { ...this.systemInject, ...cfg.system_inject };
+      this.deepseek.modelPreset = this.deepseekModels.includes(this.deepseek.model) ? this.deepseek.model : '__custom__';
+      this.deepseek.matchPreset = this.matchOptions.includes(this.deepseek.match) ? this.deepseek.match : '__custom__';
+      this.openrouter.modelPreset = this.openrouterModels.includes(this.openrouter.model) ? this.openrouter.model : '__custom__';
+      this.openrouter.matchPreset = this.matchOptions.includes(this.openrouter.match) ? this.openrouter.match : '__custom__';
+      void this.fetchOpenRouterModels();
     },
-    get shells() {
-      const url = this.status.proxyUrl || 'http://localhost:8080';
-      return [
-        { label: 'bash / zsh', connect: `export ANTHROPIC_BASE_URL=${url}`, revert: 'unset ANTHROPIC_BASE_URL' },
-        { label: 'fish', connect: `set -x ANTHROPIC_BASE_URL ${url}`, revert: 'set -e ANTHROPIC_BASE_URL' },
-        { label: 'PowerShell', connect: `$env:ANTHROPIC_BASE_URL = "${url}"`, revert: 'Remove-Item Env:ANTHROPIC_BASE_URL' },
-        { label: 'cmd', connect: `set ANTHROPIC_BASE_URL=${url}`, revert: 'set ANTHROPIC_BASE_URL=' },
-      ];
+    async fetchOpenRouterModels() {
+      this.openrouterModelsLoading = true;
+      this.openrouterModelsError = null;
+      try {
+        const url = '/_proxy/api/setup/models?provider=openrouter&base_url=' + encodeURIComponent(this.openrouter.base_url || '');
+        const res = await fetch(url);
+        const data = await res.json();
+        if (data.ok && data.models && data.models.length) {
+          this.openrouterModels = data.models;
+          this.openrouter.modelPreset = this.openrouterModels.includes(this.openrouter.model) ? this.openrouter.model : '__custom__';
+          // Replacing the option list can desync the native <select>'s
+          // displayed value when modelPreset doesn't itself change (Alpine
+          // won't re-run the x-model sync for an unchanged value), so force
+          // it once the new <option> elements are in the DOM.
+          this.$nextTick(() => {
+            if (this.$refs.openrouterModelSelect) this.$refs.openrouterModelSelect.value = this.openrouter.modelPreset;
+          });
+        } else {
+          this.openrouterModelsError = data.message || 'failed to load models from OpenRouter';
+        }
+      } catch (e) {
+        this.openrouterModelsError = String(e);
+      } finally {
+        this.openrouterModelsLoading = false;
+      }
     },
-    copy(text) {
-      navigator.clipboard.writeText(text);
-    },
-    async testDeepSeek() {
+    async test() {
       this.testing = true;
       this.testResult = null;
       try {
-        const res = await fetch('/_proxy/api/setup/test-deepseek', {
+        const endpoint = this.activeProvider === 'deepseek' ? '/_proxy/api/setup/test-deepseek' : '/_proxy/api/setup/test-openrouter';
+        const res = await fetch(endpoint, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(this.deepseek),
+          body: JSON.stringify(this.current()),
         });
         this.testResult = await res.json();
       } finally {
         this.testing = false;
-      }
-    },
-    async testOpenRouter() {
-      this.testingOpenRouter = true;
-      this.testOpenRouterResult = null;
-      try {
-        const res = await fetch('/_proxy/api/setup/test-openrouter', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(this.openrouter),
-        });
-        this.testOpenRouterResult = await res.json();
-      } finally {
-        this.testingOpenRouter = false;
       }
     },
     async save() {
