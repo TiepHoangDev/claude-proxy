@@ -105,6 +105,7 @@ func main() {
 			if usage := fetchClaudeUsage(); usage != nil {
 				store.UpdateClaudeUsage(usage)
 			}
+			store.UpdateActiveRoute(computeActiveRoute(cfg))
 			time.Sleep(60 * time.Second)
 		}
 	}()
@@ -279,6 +280,47 @@ func capBody(b []byte) string {
 		return string(b)
 	}
 	return string(b[:maxStoredBody]) + "\n...(truncated)"
+}
+
+// computeActiveRoute reports which alternate provider (if any) requests are
+// currently being routed to (DeepSeek takes priority over OpenRouter,
+// matching router.Config.Resolve), along with that model's pricing looked up
+// from OpenRouter's public catalog — which also covers DeepSeek models,
+// since DeepSeek doesn't expose pricing via an API.
+func computeActiveRoute(cfg *router.Config) *stats.ActiveRoute {
+	if cfg == nil {
+		return nil
+	}
+	if cfg.DeepSeek != nil && cfg.DeepSeek.Model != "" {
+		route := &stats.ActiveRoute{Provider: "deepseek", Model: cfg.DeepSeek.Model}
+		if models, err := router.FetchOpenRouterModels(""); err == nil {
+			if m := findOpenRouterModel(models, "deepseek/"+cfg.DeepSeek.Model); m != nil {
+				route.PromptPricePerM = m.PromptPricePerM
+				route.CompletionPricePerM = m.CompletionPricePerM
+			}
+		}
+		return route
+	}
+	if cfg.OpenRouter != nil && cfg.OpenRouter.Model != "" {
+		route := &stats.ActiveRoute{Provider: "openrouter", Model: cfg.OpenRouter.Model}
+		if models, err := router.FetchOpenRouterModels(cfg.OpenRouter.BaseURL); err == nil {
+			if m := findOpenRouterModel(models, cfg.OpenRouter.Model); m != nil {
+				route.PromptPricePerM = m.PromptPricePerM
+				route.CompletionPricePerM = m.CompletionPricePerM
+			}
+		}
+		return route
+	}
+	return nil
+}
+
+func findOpenRouterModel(models []router.OpenRouterModel, id string) *router.OpenRouterModel {
+	for i := range models {
+		if models[i].ID == id {
+			return &models[i]
+		}
+	}
+	return nil
 }
 
 func fetchClaudeUsage() *stats.ClaudeUsage {

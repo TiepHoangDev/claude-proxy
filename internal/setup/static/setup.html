@@ -80,8 +80,8 @@ select:disabled { opacity: 0.6; }
       <select x-ref="openrouterModelSelect" x-model="openrouter.modelPreset" @change="if (openrouter.modelPreset !== '__custom__') openrouter.model = openrouter.modelPreset">
         <template x-for="group in openrouterModelGroups" :key="group.provider">
           <optgroup :label="group.provider">
-            <template x-for="m in group.models" :key="m">
-              <option :value="m" x-text="m"></option>
+            <template x-for="m in group.models" :key="m.id">
+              <option :value="m.id" x-text="formatModelOption(m)"></option>
             </template>
           </optgroup>
         </template>
@@ -92,6 +92,7 @@ select:disabled { opacity: 0.6; }
     <input x-show="openrouter.modelPreset === '__custom__'" type="text" x-model="openrouter.model" placeholder="anthropic/claude-haiku-4.5">
     <span class="hint" x-show="openrouterModelsLoading">Loading models from OpenRouter…</span>
     <span class="result-err" x-show="openrouterModelsError" x-text="openrouterModelsError"></span>
+    <p class="hint" x-show="selectedOpenrouterModel" x-text="formatModelDetail(selectedOpenrouterModel)"></p>
   </label>
   <label>Match (requested model must contain this, case-insensitive)
     <select x-model="current().matchPreset" @change="if (current().matchPreset !== '__custom__') current().match = current().matchPreset">
@@ -136,7 +137,11 @@ function setupPage() {
     openrouter: { api_key: '', base_url: 'https://openrouter.ai/api', model: 'anthropic/claude-haiku-4.5', match: 'haiku', modelPreset: 'anthropic/claude-haiku-4.5', matchPreset: 'haiku' },
     systemInject: { match: 'haiku', text: 'If you need clarification or a decision before continuing, stop and return the question as your final result instead of guessing.' },
     deepseekModels: ['deepseek-chat', 'deepseek-reasoner', 'deepseek-v4-pro'],
-    openrouterModels: ['anthropic/claude-haiku-4.5', 'anthropic/claude-sonnet-4.5', 'anthropic/claude-opus-4.5'],
+    openrouterModels: [
+      { id: 'anthropic/claude-haiku-4.5', promptPricePerM: 0, completionPricePerM: 0, codingIndex: null },
+      { id: 'anthropic/claude-sonnet-4.5', promptPricePerM: 0, completionPricePerM: 0, codingIndex: null },
+      { id: 'anthropic/claude-opus-4.5', promptPricePerM: 0, completionPricePerM: 0, codingIndex: null },
+    ],
     matchOptions: ['haiku', 'sonnet', 'opus'],
     openrouterModelsLoading: false,
     openrouterModelsError: null,
@@ -153,7 +158,7 @@ function setupPage() {
       const groups = [];
       let current = null;
       for (const m of this.openrouterModels) {
-        const provider = m.includes('/') ? m.slice(0, m.indexOf('/')) : 'other';
+        const provider = m.id.includes('/') ? m.id.slice(0, m.id.indexOf('/')) : 'other';
         if (!current || current.provider !== provider) {
           current = { provider, models: [] };
           groups.push(current);
@@ -161,6 +166,42 @@ function setupPage() {
         current.models.push(m);
       }
       return groups;
+    },
+    get selectedOpenrouterModel() {
+      const id = this.openrouter.modelPreset === '__custom__' ? this.openrouter.model : this.openrouter.modelPreset;
+      return this.openrouterModels.find((m) => m.id === id) || null;
+    },
+    // <option> text collapses regular runs of spaces like any inline HTML
+    // text, so column alignment here relies on non-breaking spaces (NBSP)
+    // instead — those aren't collapsed, and the select/option font is
+    // monospace (see CSS), so fixed-width padding lines up visually.
+    formatModelOption(m) {
+      const NBSP = ' ';
+      const padRight = (s, len) => (s.length >= len ? s : s + NBSP.repeat(len - s.length));
+      const padLeft = (s, len) => (s.length >= len ? s : NBSP.repeat(len - s.length) + s);
+
+      const name = m.id.includes('/') ? m.id.slice(m.id.indexOf('/') + 1) : m.id;
+      const priceStr =
+        m.promptPricePerM || m.completionPricePerM
+          ? `$${padLeft(this.fmtPrice(m.promptPricePerM), 6)}/$${padLeft(this.fmtPrice(m.completionPricePerM), 6)}`
+          : padLeft('n/a', 15);
+      const codingStr = m.codingIndex != null ? padLeft(String(m.codingIndex), 5) : padLeft('n/a', 5);
+
+      return `${padRight(name, 32)}${NBSP}${priceStr}/1M${NBSP}${NBSP}cx${NBSP}${codingStr}`;
+    },
+    formatModelDetail(m) {
+      const parts = [`Prompt $${this.fmtPrice(m.promptPricePerM)} / Completion $${this.fmtPrice(m.completionPricePerM)} per 1M tokens`];
+      if (m.contextLength) parts.push(`context ${this.fmtNum(m.contextLength)}`);
+      parts.push(m.codingIndex != null ? `coding index ${m.codingIndex}` : 'coding index n/a');
+      return parts.join('  ·  ');
+    },
+    fmtPrice(n) {
+      return (n || 0).toFixed(2);
+    },
+    fmtNum(n) {
+      if (n >= 1_000_000) return (n / 1_000_000).toFixed(1) + 'M';
+      if (n >= 1_000) return Math.round(n / 1_000) + 'K';
+      return String(n);
     },
     async init() {
       const res = await fetch('/_proxy/api/setup/status');
@@ -171,7 +212,7 @@ function setupPage() {
       if (cfg.system_inject) this.systemInject = { ...this.systemInject, ...cfg.system_inject };
       this.deepseek.modelPreset = this.deepseekModels.includes(this.deepseek.model) ? this.deepseek.model : '__custom__';
       this.deepseek.matchPreset = this.matchOptions.includes(this.deepseek.match) ? this.deepseek.match : '__custom__';
-      this.openrouter.modelPreset = this.openrouterModels.includes(this.openrouter.model) ? this.openrouter.model : '__custom__';
+      this.openrouter.modelPreset = this.openrouterModels.some((m) => m.id === this.openrouter.model) ? this.openrouter.model : '__custom__';
       this.openrouter.matchPreset = this.matchOptions.includes(this.openrouter.match) ? this.openrouter.match : '__custom__';
       void this.fetchOpenRouterModels();
     },
@@ -184,7 +225,7 @@ function setupPage() {
         const data = await res.json();
         if (data.ok && data.models && data.models.length) {
           this.openrouterModels = data.models;
-          this.openrouter.modelPreset = this.openrouterModels.includes(this.openrouter.model) ? this.openrouter.model : '__custom__';
+          this.openrouter.modelPreset = this.openrouterModels.some((m) => m.id === this.openrouter.model) ? this.openrouter.model : '__custom__';
           // Replacing the option list can desync the native <select>'s
           // displayed value when modelPreset doesn't itself change (Alpine
           // won't re-run the x-model sync for an unchanged value), so force

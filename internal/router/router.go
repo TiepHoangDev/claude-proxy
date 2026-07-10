@@ -102,10 +102,10 @@ func FetchDeepSeekBalance(cfg *DeepSeekConfig) *DeepSeekBalanceResult {
 	var result struct {
 		IsAvailable  bool `json:"is_available"`
 		BalanceInfos []struct {
-			Currency         string `json:"currency"`
-			TotalBalance     string `json:"total_balance"`
-			GrantedBalance   string `json:"granted_balance"`
-			ToppedUpBalance  string `json:"topped_up_balance"`
+			Currency        string `json:"currency"`
+			TotalBalance    string `json:"total_balance"`
+			GrantedBalance  string `json:"granted_balance"`
+			ToppedUpBalance string `json:"topped_up_balance"`
 		} `json:"balance_infos"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
@@ -233,11 +233,23 @@ func TestOpenRouter(cfg *OpenRouterConfig) (ok bool, message string) {
 	return testAnthropicCompatible(cfg.BaseURL, cfg.Model, "Authorization", "Bearer "+cfg.APIKey)
 }
 
+// OpenRouterModel describes one entry from OpenRouter's model catalog:
+// pricing (normalized to USD per 1M tokens, from the API's per-token
+// strings) and, when OpenRouter reports it, an Artificial Analysis coding
+// benchmark score.
+type OpenRouterModel struct {
+	ID                  string   `json:"id"`
+	ContextLength       int      `json:"contextLength,omitempty"`
+	PromptPricePerM     float64  `json:"promptPricePerM"`
+	CompletionPricePerM float64  `json:"completionPricePerM"`
+	CodingIndex         *float64 `json:"codingIndex,omitempty"`
+}
+
 // FetchOpenRouterModels queries OpenRouter's public model catalog and
-// returns all model slugs, sorted alphabetically (which also groups them by
-// provider prefix, e.g. "anthropic/...", "openai/...", since the slug is
+// returns all models, sorted by ID alphabetically (which also groups them
+// by provider prefix, e.g. "anthropic/...", "openai/...", since the slug is
 // "provider/model"). No API key is required for this endpoint.
-func FetchOpenRouterModels(baseURL string) ([]string, error) {
+func FetchOpenRouterModels(baseURL string) ([]OpenRouterModel, error) {
 	if baseURL == "" {
 		baseURL = "https://openrouter.ai/api"
 	}
@@ -257,18 +269,45 @@ func FetchOpenRouterModels(baseURL string) ([]string, error) {
 
 	var result struct {
 		Data []struct {
-			ID string `json:"id"`
+			ID            string `json:"id"`
+			ContextLength int    `json:"context_length"`
+			Pricing       struct {
+				Prompt     string `json:"prompt"`
+				Completion string `json:"completion"`
+			} `json:"pricing"`
+			Benchmarks struct {
+				ArtificialAnalysis struct {
+					CodingIndex *float64 `json:"coding_index"`
+				} `json:"artificial_analysis"`
+			} `json:"benchmarks"`
 		} `json:"data"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
 		return nil, fmt.Errorf("invalid response: %w", err)
 	}
 
-	models := make([]string, 0, len(result.Data))
+	models := make([]OpenRouterModel, 0, len(result.Data))
 	for _, m := range result.Data {
-		models = append(models, m.ID)
+		// OpenRouter uses "-1" as a sentinel for variable/unknown pricing
+		// (e.g. its own meta-routing models like "openrouter/auto"); treat
+		// that the same as unpriced rather than showing a negative number.
+		promptPerToken, _ := strconv.ParseFloat(m.Pricing.Prompt, 64)
+		if promptPerToken < 0 {
+			promptPerToken = 0
+		}
+		completionPerToken, _ := strconv.ParseFloat(m.Pricing.Completion, 64)
+		if completionPerToken < 0 {
+			completionPerToken = 0
+		}
+		models = append(models, OpenRouterModel{
+			ID:                  m.ID,
+			ContextLength:       m.ContextLength,
+			PromptPricePerM:     promptPerToken * 1_000_000,
+			CompletionPricePerM: completionPerToken * 1_000_000,
+			CodingIndex:         m.Benchmarks.ArtificialAnalysis.CodingIndex,
+		})
 	}
-	sort.Strings(models)
+	sort.Slice(models, func(i, j int) bool { return models[i].ID < models[j].ID })
 	return models, nil
 }
 

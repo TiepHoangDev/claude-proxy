@@ -4,12 +4,14 @@ export type ProxyState = "downloading" | "starting" | "running" | "stopped" | "e
 
 export class ProxyStatusBar {
   private readonly proxyItem: vscode.StatusBarItem;
+  private readonly routeItem: vscode.StatusBarItem;
   private readonly healthItem: vscode.StatusBarItem;
   private proxyState: ProxyState = "stopped";
   private proxyPort = 0;
 
   constructor() {
     this.proxyItem = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 100);
+    this.routeItem = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 95);
     this.healthItem = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 90);
     this.proxyItem.show();
     this.healthItem.show();
@@ -43,6 +45,17 @@ export class ProxyStatusBar {
     this.setProxy("$(warning) Claude Proxy: Error", message, "claudeProxy.showLogs");
   }
 
+  setActiveRoute(text: string, tooltip: string): void {
+    this.routeItem.text = `$(circuit-board) ${text}`;
+    this.routeItem.tooltip = tooltip;
+    this.routeItem.command = "claudeProxy.openSetup";
+    this.routeItem.show();
+  }
+
+  clearActiveRoute(): void {
+    this.routeItem.hide();
+  }
+
   setHealthWarning(text: string, tooltip: string): void {
     this.healthItem.text = `$(warning) ${text}`;
     this.healthItem.tooltip = tooltip;
@@ -63,6 +76,7 @@ export class ProxyStatusBar {
 
   dispose(): void {
     this.proxyItem.dispose();
+    this.routeItem.dispose();
     this.healthItem.dispose();
   }
 

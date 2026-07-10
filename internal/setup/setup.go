@@ -109,9 +109,9 @@ func TestOpenRouterAPIHandler() http.HandlerFunc {
 }
 
 type modelsResponse struct {
-	OK      bool     `json:"ok"`
-	Models  []string `json:"models,omitempty"`
-	Message string   `json:"message,omitempty"`
+	OK      bool                     `json:"ok"`
+	Models  []router.OpenRouterModel `json:"models,omitempty"`
+	Message string                   `json:"message,omitempty"`
 }
 
 // ModelsAPIHandler returns the list of model slugs available for provider

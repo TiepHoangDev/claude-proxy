@@ -8,6 +8,11 @@ function currentPort(): number {
   return vscode.workspace.getConfiguration("claudeProxy").get<number>("port", 8080);
 }
 
+function fmtPrice(n: number | undefined): string {
+  if (!n) return "0";
+  return n >= 10 ? n.toFixed(1) : n.toFixed(2);
+}
+
 function terminalEnvConfigKey(): string {
   if (process.platform === "darwin") return "terminal.integrated.env.osx";
   if (process.platform === "win32") return "terminal.integrated.env.windows";
@@ -47,8 +52,23 @@ export function activate(context: vscode.ExtensionContext): void {
       if (!state) {
         if (!pm.isRunning) {
           statusBar.clearHealth();
+          statusBar.clearActiveRoute();
         }
         return;
+      }
+
+      const route = state.activeRoute;
+      if (route) {
+        const price =
+          route.promptPricePerM || route.completionPricePerM
+            ? ` $${fmtPrice(route.promptPricePerM)}/$${fmtPrice(route.completionPricePerM)} per 1M`
+            : "";
+        statusBar.setActiveRoute(
+          `${route.model} (${route.provider})${price}`,
+          `Routing to ${route.provider}: ${route.model}${price ? "\nPrompt/completion price:" + price : ""}\nClick to open setup`
+        );
+      } else {
+        statusBar.clearActiveRoute();
       }
 
       if (state.apiKeyError) {

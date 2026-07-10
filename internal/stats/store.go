@@ -52,13 +52,25 @@ type ClaudeUsage struct {
 	SevenDayReset   string  `json:"sevenDayReset"`
 }
 
+// ActiveRoute describes the alternate-provider route currently configured
+// (DeepSeek takes priority over OpenRouter, matching router.Config.Resolve),
+// along with that model's pricing when known, for display in the VS Code
+// extension's status bar. Nil when no alternate routing is configured.
+type ActiveRoute struct {
+	Provider            string  `json:"provider"`
+	Model               string  `json:"model"`
+	PromptPricePerM     float64 `json:"promptPricePerM,omitempty"`
+	CompletionPricePerM float64 `json:"completionPricePerM,omitempty"`
+}
+
 // HealthState tracks the current API key and rate limit health.
 type HealthState struct {
-	APIKeyError    string           `json:"apiKeyError,omitempty"`
-	RateLimit      RateLimitInfo    `json:"rateLimit"`
-	ClaudeUsage    *ClaudeUsage     `json:"claudeUsage,omitempty"`
-	DeepSeek       *DeepSeekBalance `json:"deepseek,omitempty"`
-	LastCheck      time.Time        `json:"lastCheck"`
+	APIKeyError string           `json:"apiKeyError,omitempty"`
+	RateLimit   RateLimitInfo    `json:"rateLimit"`
+	ClaudeUsage *ClaudeUsage     `json:"claudeUsage,omitempty"`
+	DeepSeek    *DeepSeekBalance `json:"deepseek,omitempty"`
+	ActiveRoute *ActiveRoute     `json:"activeRoute,omitempty"`
+	LastCheck   time.Time        `json:"lastCheck"`
 }
 
 type Store struct {
@@ -132,6 +144,12 @@ func (s *Store) UpdateDeepSeekBalance(bal *DeepSeekBalance) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.health.DeepSeek = bal
+}
+
+func (s *Store) UpdateActiveRoute(route *ActiveRoute) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.health.ActiveRoute = route
 }
 
 func (s *Store) UpdateHealth(rl RateLimitInfo, apiKeyError string) {

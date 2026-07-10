@@ -14,11 +14,19 @@ export interface ClaudeUsage {
   sevenDayReset: string;
 }
 
+export interface ActiveRoute {
+  provider: string;
+  model: string;
+  promptPricePerM?: number;
+  completionPricePerM?: number;
+}
+
 export interface HealthState {
   apiKeyError?: string;
   rateLimit: RateLimitInfo;
   claudeUsage?: ClaudeUsage;
   deepseek?: DeepSeekBalance;
+  activeRoute?: ActiveRoute;
   lastCheck: string;
 }
 

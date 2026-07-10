@@ -400,9 +400,9 @@ func TestFetchOpenRouterModelsReturnsAllSorted(t *testing.T) {
 		}
 		w.WriteHeader(http.StatusOK)
 		w.Write([]byte(`{"data":[
-			{"id":"anthropic/claude-sonnet-4.5"},
-			{"id":"openai/gpt-5"},
-			{"id":"anthropic/claude-haiku-4.5"}
+			{"id":"anthropic/claude-sonnet-4.5","context_length":200000,"pricing":{"prompt":"0.000003","completion":"0.000015"},"benchmarks":{"artificial_analysis":{"coding_index":74.5}}},
+			{"id":"openai/gpt-5","context_length":400000,"pricing":{"prompt":"0.0000011","completion":"0.0000044"}},
+			{"id":"anthropic/claude-haiku-4.5","context_length":200000,"pricing":{"prompt":"0.000001","completion":"0.000005"},"benchmarks":{"artificial_analysis":{"coding_index":68.1}}}
 		]}`))
 	}))
 	defer srv.Close()
@@ -411,14 +411,27 @@ func TestFetchOpenRouterModelsReturnsAllSorted(t *testing.T) {
 	if err != nil {
 		t.Fatalf("FetchOpenRouterModels error: %v", err)
 	}
-	want := []string{"anthropic/claude-haiku-4.5", "anthropic/claude-sonnet-4.5", "openai/gpt-5"}
-	if len(models) != len(want) {
-		t.Fatalf("models = %v, want %v", models, want)
+	wantIDs := []string{"anthropic/claude-haiku-4.5", "anthropic/claude-sonnet-4.5", "openai/gpt-5"}
+	if len(models) != len(wantIDs) {
+		t.Fatalf("models = %+v, want IDs %v", models, wantIDs)
 	}
-	for i := range want {
-		if models[i] != want[i] {
-			t.Errorf("models[%d] = %q, want %q", i, models[i], want[i])
+	for i, id := range wantIDs {
+		if models[i].ID != id {
+			t.Errorf("models[%d].ID = %q, want %q", i, models[i].ID, id)
 		}
+	}
+
+	sonnet := models[1]
+	if sonnet.PromptPricePerM != 3 || sonnet.CompletionPricePerM != 15 {
+		t.Errorf("sonnet pricing = %v/%v, want 3/15", sonnet.PromptPricePerM, sonnet.CompletionPricePerM)
+	}
+	if sonnet.CodingIndex == nil || *sonnet.CodingIndex != 74.5 {
+		t.Errorf("sonnet coding index = %v, want 74.5", sonnet.CodingIndex)
+	}
+
+	gpt5 := models[2]
+	if gpt5.CodingIndex != nil {
+		t.Errorf("gpt5 coding index = %v, want nil (not reported)", *gpt5.CodingIndex)
 	}
 }
 
